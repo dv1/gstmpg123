@@ -35,7 +35,8 @@ def add_compiler_flags(conf, env, flags, lang, compiler, uselib = ''):
 
 
 def options(opt):
-	opt.add_option('--debug', action='store_true', default=False, help='enable debug build')
+	opt.add_option('--debug', action='store_true', default=False, help='enable debug build [default: %default]')
+	opt.add_option('--plugin-install-path', action='store', default="${PREFIX}/lib/gstreamer-0.10", help='Where to install the plugin [default: %default]')
 	opt.tool_options('compiler_cc')
 
 
@@ -94,6 +95,7 @@ def build(bld):
 		includes = '.',
 		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO MPG123 COMMON',
 		target = 'gstmpg123',
-		source = 'gstmpg123.c'
+		source = 'gstmpg123.c',
+		install_path = bld.options.plugin_install_path
 	)
 
