@@ -86,6 +86,8 @@ def configure(conf):
 
 	add_compiler_flags(conf, conf.env, compiler_flags, 'C', 'CC', 'COMMON')
 
+	conf.env['PLUGIN_INSTALL_PATH'] = conf.options.plugin_install_path
+
 	conf.write_config_header('config.h')
 
 
@@ -96,6 +98,6 @@ def build(bld):
 		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO MPG123 COMMON',
 		target = 'gstmpg123',
 		source = 'gstmpg123.c',
-		install_path = bld.options.plugin_install_path
+		install_path = bld.env['PLUGIN_INSTALL_PATH']
 	)
 
