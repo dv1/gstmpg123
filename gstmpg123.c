@@ -44,6 +44,22 @@ enum
 };
 
 
+/*
+Omitted sample formats that mpg123 supports (or at least can support):
+8bit integer signed
+8bit integer unsigned
+a-law
+mu-law
+64bit float
+
+The first four formats are not supported by the GstAudioDecoder base class.
+(The internal gst_audio_format_from_caps_structure() call fails.)
+The 64bit float issue is tricky. mpg123 actually decodes to "real", not necessarily to "float".
+"real" can be fixed point, 32bit float, 64bit float. There seems to be no way how to find out which one of them is actually used.
+However, in all known installations, "real" equals 32bit float, so that's what is used.
+*/
+
+
 static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
 	"src",
 	GST_PAD_SRC,
@@ -135,11 +151,9 @@ void gst_mpg123_class_init(GstMpg123Class *klass)
 
 	error = mpg123_init();
 	if (G_UNLIKELY(error != MPG123_OK))
-	{
 		GST_ERROR("Could not initialize mpg123 library: %s", mpg123_plain_strerror(error));
-	}
-
-	GST_TRACE("mpg123 library initialized");
+	else
+		GST_TRACE("mpg123 library initialized");
 }
 
 
@@ -203,6 +217,7 @@ static gboolean gst_mpg123_stop(GstAudioDecoder *dec)
 
 static void gst_mpg123_push_output_buffer(GstMpg123 *decoder, GstBuffer *output_buffer, size_t num_decoded_bytes)
 {
+	/* This usually happens at the beginning, before mpg123 has enough information to actually decode something. */
 	if (num_decoded_bytes == 0)
 	{
 		gst_buffer_unref(output_buffer);
@@ -261,8 +276,10 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 
 	switch (decode_error)
 	{
+		/* NEW_FORMAT information is redundant; upstream told us about the rate and number of channels, downstream about the sample format */
 		case MPG123_NEW_FORMAT:
 		case MPG123_NEED_MORE:
+		case MPG123_OK:
 			gst_mpg123_push_output_buffer(decoder, output_buffer, num_decoded_bytes);
 			break;
 		case MPG123_DONE:
@@ -398,6 +415,7 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 
 	/* Get the caps that are allowed by downstream */
 	allowed_srccaps = gst_pad_get_allowed_caps(GST_AUDIO_DECODER_SRC_PAD(dec));
+	allowed_srccaps = gst_caps_normalize(allowed_srccaps);
 
 	/* Go through all allowed caps, pick the first one that matches */
 	for (structure_nr = 0; structure_nr < gst_caps_get_size(allowed_srccaps); ++structure_nr)
@@ -426,7 +444,7 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 
 		if (!gst_mpg123_determine_encoding(media_type, width, width_available, signed_, &is_integer, &encoding))
 		{
-			GST_TRACE_OBJECT(dec, "mpg123 cannot use caps %" GST_PTR_FORMAT, structure);
+			GST_TRACE_OBJECT(dec, "mpg123 cannot use caps with rate %d width %d (available = %d) signed %d", rate, width, width_available, signed_);
 			continue;
 		}
 
