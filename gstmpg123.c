@@ -414,8 +414,11 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 	}
 
 	/* Get the caps that are allowed by downstream */
-	allowed_srccaps = gst_pad_get_allowed_caps(GST_AUDIO_DECODER_SRC_PAD(dec));
-	allowed_srccaps = gst_caps_normalize(allowed_srccaps);
+	{
+		GstCaps *allowed_srccaps_unnorm = gst_pad_get_allowed_caps(GST_AUDIO_DECODER_SRC_PAD(dec));
+		allowed_srccaps = gst_caps_normalize(allowed_srccaps_unnorm);
+		gst_caps_unref(allowed_srccaps_unnorm);
+	}
 
 	/* Go through all allowed caps, pick the first one that matches */
 	for (structure_nr = 0; structure_nr < gst_caps_get_size(allowed_srccaps); ++structure_nr)
