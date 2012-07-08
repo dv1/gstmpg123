@@ -45,9 +45,6 @@ struct _GstMpg123
 {
 	GstAudioDecoder parent;
 	mpg123_handle *handle;
-	gboolean format_received;
-	int last_decode_retval;
-	GstBuffer *output_buffer;
 };
 
 

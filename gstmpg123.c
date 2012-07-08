@@ -21,6 +21,7 @@
 
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 #include <config.h>
 #include "gstmpg123.h"
 
@@ -51,27 +52,15 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
 		"audio/x-raw-int, "
 		"endianness = (int) " G_STRINGIFY (G_BYTE_ORDER) ", "
 		"signed = (boolean) { false, true }, "
-		"width = (int) { 8, 16, 24, 32 }, "
-		"depth = (int) { 8, 16, 24, 32 }, "
+		"width = (int) { 16, 24, 32 }, "
+		"depth = (int) { 16, 24, 32 }, "
 		"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
 		"channels = (int) [ 1, 2 ]; "
 
 		"audio/x-raw-float, "
 		"endianness = (int) " G_STRINGIFY (G_BYTE_ORDER) ", "
-		"width = (int) { 32, 64 }, "
-		"depth = (int) { 32, 64 }, "
-		"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
-		"channels = (int) [ 1, 2 ]; "
-
-		"audio/x-alaw, "
-		"width = (int) 8, "
-		"depth = (int) 8, "
-		"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
-		"channels = (int) [ 1, 2 ]; "
-
-		"audio/x-mulaw, "
-		"width = (int) 8, "
-		"depth = (int) 8, "
+		"width = (int) 32, "
+		"depth = (int) 32, "
 		"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
 		"channels = (int) [ 1, 2 ] "
 	)
@@ -95,7 +84,10 @@ static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE(
 static void gst_mpg123_finalize(GObject *object);
 static gboolean gst_mpg123_start(GstAudioDecoder *dec);
 static gboolean gst_mpg123_stop(GstAudioDecoder *dec);
+static void gst_mpg123_push_output_buffer(GstMpg123 *decoder, GstBuffer *output_buffer, size_t num_decoded_bytes);
 static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *buffer);
+static gboolean gst_mpg123_determine_encoding(char const *media_type, int const width, gboolean const width_available, gboolean const signed_, gboolean *is_integer, int *encoding);
+static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_caps);
 
 
 GST_BOILERPLATE(GstMpg123, gst_mpg123, GstAudioDecoder, GST_TYPE_AUDIO_DECODER)
@@ -103,8 +95,6 @@ GST_BOILERPLATE(GstMpg123, gst_mpg123, GstAudioDecoder, GST_TYPE_AUDIO_DECODER)
 
 static char const * media_type_int   = "audio/x-raw-int";
 static char const * media_type_float = "audio/x-raw-float";
-static char const * media_type_alaw  = "audio/x-alaw";
-static char const * media_type_mulaw = "audio/x-mulaw";
 
 
 
@@ -141,6 +131,7 @@ void gst_mpg123_class_init(GstMpg123Class *klass)
 	base_class->start = GST_DEBUG_FUNCPTR(gst_mpg123_start);
 	base_class->stop = GST_DEBUG_FUNCPTR(gst_mpg123_stop);
 	base_class->handle_frame = GST_DEBUG_FUNCPTR(gst_mpg123_handle_frame);
+	base_class->set_format = GST_DEBUG_FUNCPTR(gst_mpg123_set_format);
 
 	error = mpg123_init();
 	if (G_UNLIKELY(error != MPG123_OK))
@@ -178,10 +169,8 @@ static gboolean gst_mpg123_start(GstAudioDecoder *dec)
 	decoder = GST_MPG123(dec);
 	error = 0;
 
-	decoder->format_received = FALSE;
-	decoder->last_decode_retval = MPG123_NEED_MORE;
 	decoder->handle = mpg123_new(NULL, &error);
-	decoder->output_buffer = NULL;
+	mpg123_format_none(decoder->handle);
 	mpg123_param(decoder->handle, MPG123_ADD_FLAGS, MPG123_GAPLESS, 0);
 	mpg123_param(decoder->handle, MPG123_ADD_FLAGS, MPG123_SEEKBUFFER, 0); /* this tells mpg123 to use a small read-ahead buffer for better MPEG sync; essential for MP3 radio streams */
 	mpg123_param(decoder->handle, MPG123_RESYNC_LIMIT, -1, 0); /* sets the resync limit to the end of the stream (e.g. don't give up prematurely) */
@@ -208,137 +197,21 @@ static gboolean gst_mpg123_stop(GstAudioDecoder *dec)
 		decoder->handle = NULL;
 	}
 
-	if (decoder->output_buffer != NULL)
-	{
-		gst_buffer_unref(decoder->output_buffer);
-		decoder->output_buffer = NULL;
-	}
-
 	return TRUE;
 }
 
 
-static gboolean gst_mpg123_use_new_format(GstMpg123 *decoder)
-{
-	{
-		long rate;
-		int channels, enc, width;
-		GstCaps *caps;
-		char const *media_type;
-		gboolean signed_ = FALSE;
-
-		{
-			int ret;
-
-			ret = mpg123_getformat(decoder->handle, &rate, &channels, &enc);
-
-			if (ret != MPG123_OK)
-			{
-				GstElement *element = GST_ELEMENT(decoder);
-				GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Error while getting mpg123 format: %s", mpg123_plain_strerror(ret)));
-
-				return FALSE;
-			}
-		}
-
-		switch (enc)
-		{
-#ifdef MPG123_ENC_UNSIGNED_8_SUPPORTED
-			case MPG123_ENC_UNSIGNED_8:  media_type = media_type_int; signed_ = FALSE; width = 1; break;
-#endif
-#ifdef MPG123_ENC_SIGNED_8_SUPPORTED
-			case MPG123_ENC_SIGNED_8:    media_type = media_type_int; signed_ = TRUE;  width = 1; break;
-#endif
-#ifdef MPG123_ENC_UNSIGNED_16_SUPPORTED
-			case MPG123_ENC_UNSIGNED_16: media_type = media_type_int; signed_ = FALSE; width = 2; break;
-#endif
-#ifdef MPG123_ENC_SIGNED_16_SUPPORTED
-			case MPG123_ENC_SIGNED_16:   media_type = media_type_int; signed_ = TRUE;  width = 2; break;
-#endif
-#ifdef MPG123_ENC_UNSIGNED_24_SUPPORTED
-			case MPG123_ENC_UNSIGNED_24: media_type = media_type_int; signed_ = FALSE; width = 3; break;
-#endif
-#ifdef MPG123_ENC_SIGNED_24_SUPPORTED
-			case MPG123_ENC_SIGNED_24:   media_type = media_type_int; signed_ = TRUE;  width = 3; break;
-#endif
-#ifdef MPG123_ENC_UNSIGNED_32_SUPPORTED
-			case MPG123_ENC_UNSIGNED_32: media_type = media_type_int; signed_ = FALSE; width = 4; break;
-#endif
-#ifdef MPG123_ENC_SIGNED_32_SUPPORTED
-			case MPG123_ENC_SIGNED_32:   media_type = media_type_int; signed_ = TRUE;  width = 4; break;
-#endif
-
-#ifdef MPG123_ENC_FLOAT_32_SUPPORTED
-			case MPG123_ENC_FLOAT_32: media_type = media_type_float; width = 4; break;
-#endif
-#ifdef MPG123_ENC_FLOAT_64_SUPPORTED
-			case MPG123_ENC_FLOAT_64: media_type = media_type_float; width = 8; break;
-#endif
-
-#ifdef MPG123_ENC_ALAW_8_SUPPORTED
-			case MPG123_ENC_ALAW_8: media_type = media_type_alaw;  width = 1; break;
-#endif
-#ifdef MPG123_ENC_ULAW_8_SUPPORTED
-			case MPG123_ENC_ULAW_8: media_type = media_type_mulaw; width = 1; break;
-#endif
-
-			default:
-				media_type = NULL;
-				width = 0;
-				GST_ERROR_OBJECT(decoder, "Unknown format %d", enc);
-				return FALSE;
-		}
-
-		caps = gst_caps_new_simple(
-			media_type,
-			"width", G_TYPE_INT, width * 8,
-			"depth", G_TYPE_INT, width * 8,
-			"rate", G_TYPE_INT, rate,
-			"channels", G_TYPE_INT, channels,
-			NULL
-		);
-		if (caps == NULL)
-		{
-			GstElement *element = GST_ELEMENT(decoder);
-			GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Could not get caps for new format (%d bpp, %d Hz, %d channels)", width * 8, rate, channels));
-			return FALSE;
-		}
-
-		if (media_type == media_type_int) /* NOTE: pointer comparison is intentional */
-		{
-			gst_caps_set_simple(
-				caps,
-				"endianness", G_TYPE_INT, G_BYTE_ORDER,
-				"signed", G_TYPE_BOOLEAN, signed_,
-				NULL
-			);
-		}
-
-		gst_pad_set_caps(GST_AUDIO_DECODER_SRC_PAD(decoder), caps);
-
-		if (decoder->output_buffer != NULL)
-		{
-			gst_buffer_set_caps(decoder->output_buffer, caps);
-		}
-
-		gst_caps_unref(caps);
-	}
-
-	decoder->format_received = TRUE;
-
-	return TRUE;
-}
-
-
-static void gst_mpg123_push_output_buffer(GstMpg123 *decoder, size_t num_decoded_bytes)
+static void gst_mpg123_push_output_buffer(GstMpg123 *decoder, GstBuffer *output_buffer, size_t num_decoded_bytes)
 {
 	if (num_decoded_bytes == 0)
+	{
+		gst_buffer_unref(output_buffer);
 		return;
+	}
 
-	GST_BUFFER_SIZE(decoder->output_buffer) = num_decoded_bytes;
+	GST_BUFFER_SIZE(output_buffer) = num_decoded_bytes;
 	GST_TRACE_OBJECT(decoder, "Pushing output buffer with %d byte", num_decoded_bytes);
-	gst_audio_decoder_finish_frame(GST_AUDIO_DECODER(decoder), decoder->output_buffer, 1);
-	decoder->output_buffer = NULL;
+	gst_audio_decoder_finish_frame(GST_AUDIO_DECODER(decoder), output_buffer, 1);
 }
 
 
@@ -347,6 +220,7 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 	unsigned char const *inmemory;
 	size_t inmemsize;
 	GstMpg123 *decoder;
+	GstBuffer *output_buffer;
 
 	if (G_UNLIKELY(!buffer))
 		return GST_FLOW_OK;
@@ -355,107 +229,260 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 	inmemsize = GST_BUFFER_SIZE(buffer);
 	decoder = GST_MPG123(dec);
 
-	if (decoder->format_received)
+	unsigned char *outmemory;
+	size_t outmemsize;
+	int decode_error;
+	size_t num_decoded_bytes = 0;
+
+	GST_TRACE_OBJECT(decoder, "About to decode input data and push decoded samples downstream");
+
 	{
-		unsigned char *outmemory;
-		size_t outmemsize;
-		int decode_error;
-		size_t num_decoded_bytes = 0;
-
-		GST_TRACE_OBJECT(decoder, "About to decode input data and push decoded samples downstream");
-
-		if (decoder->output_buffer == NULL)
+		GstFlowReturn alloc_error;
+		GST_TRACE_OBJECT(decoder, "Creating new output buffer with caps %" GST_PTR_FORMAT, GST_PAD_CAPS(GST_AUDIO_DECODER_SRC_PAD(decoder)));
+		alloc_error = gst_pad_alloc_buffer(
+			GST_AUDIO_DECODER_SRC_PAD(decoder),
+			GST_BUFFER_OFFSET_NONE,
+			INITIAL_OUTPUT_BUFFER_SIZE,
+			GST_PAD_CAPS(GST_AUDIO_DECODER_SRC_PAD(decoder)),
+			&output_buffer
+		);
+		if (alloc_error != GST_FLOW_OK)
 		{
-			GstFlowReturn alloc_error;
-			GST_TRACE_OBJECT(decoder, "No output buffer exists - creating a new one");
-			alloc_error = gst_pad_alloc_buffer_and_set_caps(
-				GST_AUDIO_DECODER_SRC_PAD(decoder),
-				GST_BUFFER_OFFSET_NONE,
-				INITIAL_OUTPUT_BUFFER_SIZE,
-				GST_PAD_CAPS(GST_AUDIO_DECODER_SRC_PAD(decoder)),
-				&(decoder->output_buffer)
-			);
-			if (alloc_error != GST_FLOW_OK)
-			{
-				/* TODO: if decoder->output_buffer is not NULL after the alloc call, should it be unref'd? */
-				GstElement *element = GST_ELEMENT(dec);
-				GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Creating new output buffer failed"));
-				return alloc_error;
-			}
-		}
-		else
-		{
-			GST_TRACE_OBJECT(decoder, "Output buffer already exists - reusing it");
-		}
-
-		outmemory = (unsigned char *) GST_BUFFER_DATA(decoder->output_buffer);
-		outmemsize = GST_BUFFER_SIZE(decoder->output_buffer);
-		decode_error = mpg123_decode(decoder->handle, inmemory, inmemsize, outmemory, outmemsize, &num_decoded_bytes);
-
-		switch (decode_error)
-		{
-			case MPG123_NEED_MORE:
-				gst_mpg123_push_output_buffer(decoder, num_decoded_bytes);
-				break;
-			case MPG123_DONE:
-				GST_DEBUG_OBJECT(decoder, "mpg123 is done decoding");
-				gst_mpg123_push_output_buffer(decoder, num_decoded_bytes);
-				return GST_FLOW_UNEXPECTED;
-			case MPG123_NEW_FORMAT:
-			{
-				GST_DEBUG_OBJECT(decoder, "mpg123 reports a new format");
-				if (!gst_mpg123_use_new_format(decoder))
-				{
-					GstElement *element = GST_ELEMENT(dec);
-					GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Using new format failed"));
-					return GST_FLOW_ERROR;
-				}
-				GST_DEBUG_OBJECT(decoder, "Successfully using new format");
-				gst_mpg123_push_output_buffer(decoder, num_decoded_bytes);
-				break;
-			}
-			default:
-			{
-				GstElement *element = GST_ELEMENT(dec);
-				GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Decoding error: %s", mpg123_plain_strerror(decode_error)));
-				return GST_FLOW_ERROR;
-			}
+			/* TODO: if decoder->output_buffer is not NULL after the alloc call, should it be unref'd? */
+			GstElement *element = GST_ELEMENT(dec);
+			GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Creating new output buffer failed"));
+			return alloc_error;
 		}
 	}
-	else
-	{
-		GST_TRACE_OBJECT(decoder, "Parsing for format data (no audio data passed downstream yet)");
-		int decode_error = mpg123_decode(decoder->handle, inmemory, inmemsize, NULL, 0, NULL);
 
-		switch (decode_error)
+	outmemory = (unsigned char *) GST_BUFFER_DATA(output_buffer);
+	outmemsize = GST_BUFFER_SIZE(output_buffer);
+	decode_error = mpg123_decode(decoder->handle, inmemory, inmemsize, outmemory, outmemsize, &num_decoded_bytes);
+
+	switch (decode_error)
+	{
+		case MPG123_NEW_FORMAT:
+		case MPG123_NEED_MORE:
+			gst_mpg123_push_output_buffer(decoder, output_buffer, num_decoded_bytes);
+			break;
+		case MPG123_DONE:
+			GST_DEBUG_OBJECT(decoder, "mpg123 is done decoding");
+			gst_mpg123_push_output_buffer(decoder, output_buffer, num_decoded_bytes);
+			return GST_FLOW_UNEXPECTED;
+		default:
 		{
-			case MPG123_NEED_MORE:
-				break;
-			case MPG123_DONE:
-				GST_DEBUG_OBJECT(decoder, "mpg123 is done decoding");
-				return GST_FLOW_UNEXPECTED;
-			case MPG123_NEW_FORMAT:
-			{
-				GST_DEBUG_OBJECT(decoder, "mpg123 reports a new format");
-				if (!gst_mpg123_use_new_format(decoder))
-				{
-					GstElement *element = GST_ELEMENT(dec);
-					GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Using new format failed"));
-					return GST_FLOW_ERROR;
-				}
-				GST_DEBUG_OBJECT(decoder, "Successfully using new format");
-				break;
-			}
-			default:
-			{
-				GstElement *element = GST_ELEMENT(dec);
-				GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Decoding error: %s", mpg123_plain_strerror(decode_error)));
-				return GST_FLOW_ERROR;
-			}
+			GstElement *element = GST_ELEMENT(dec);
+			GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Decoding error: %s", mpg123_plain_strerror(decode_error)));
+			gst_buffer_unref(output_buffer);
+			return GST_FLOW_ERROR;
 		}
 	}
 
 	return GST_FLOW_OK;
+}
+
+
+static gboolean gst_mpg123_determine_encoding(char const *media_type, int const width, gboolean const width_available, gboolean const signed_, gboolean *is_integer, int *encoding)
+{
+	if (strcmp(media_type, media_type_int) == 0)
+	{
+		*is_integer = TRUE;
+
+		if (!width_available)
+			return FALSE;
+
+		if (signed_)
+		{
+			switch (width)
+			{
+#ifdef MPG123_ENC_SIGNED_16_SUPPORTED
+				case 16: *encoding = MPG123_ENC_SIGNED_16; break;
+#endif
+#ifdef MPG123_ENC_SIGNED_24_SUPPORTED
+				case 24: *encoding = MPG123_ENC_SIGNED_24; break;
+#endif
+#ifdef MPG123_ENC_SIGNED_32_SUPPORTED
+				case 32: *encoding = MPG123_ENC_SIGNED_32; break;
+#endif
+				default:
+					return FALSE;
+			}
+		}
+		else
+		{
+			switch (width)
+			{
+#ifdef MPG123_ENC_UNSIGNED_16_SUPPORTED
+				case 16: *encoding = MPG123_ENC_UNSIGNED_16; break;
+#endif
+#ifdef MPG123_ENC_UNSIGNED_24_SUPPORTED
+				case 24: *encoding = MPG123_ENC_UNSIGNED_24; break;
+#endif
+#ifdef MPG123_ENC_UNSIGNED_32_SUPPORTED
+				case 32: *encoding = MPG123_ENC_UNSIGNED_32; break;
+#endif
+				default:
+					return FALSE;
+			}
+		}
+	}
+	else if (strcmp(media_type, media_type_float) == 0)
+	{
+		if (!width_available)
+			return FALSE;
+
+		switch (width)
+		{
+#ifdef MPG123_ENC_FLOAT_32_SUPPORTED
+			case 32: *encoding = MPG123_ENC_FLOAT_32; break;
+#endif
+			default:
+				return FALSE;
+		}
+	}
+	else
+	{
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+
+static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_caps)
+{
+/*
+	STEPS:
+
+	1. get rate and channels from incoming_caps
+	2. get allowed caps from src pad
+	3. for each structure in allowed caps:
+	3.1. take signed, width, media_type
+	3.2. if the combination of these three values is unsupported by mpg123, go to (3)
+	3.3. create candidate srccaps out of rate,channels,signed,width,media_type
+	3.4. if caps is usable (=allowed by downstream, use them, call mp123_format() with these values, and exit
+	3.5. otherwise, go to (3) if there are other structures; if not, exit with error
+*/
+
+
+	int rate, channels;
+	GstMpg123 *decoder;
+	GstCaps *allowed_srccaps;
+	guint structure_nr;
+	gboolean match_found = FALSE;
+
+	decoder = GST_MPG123(dec);
+
+	/* Get rate and channels from incoming_caps */
+	{
+		GstStructure *structure;
+		gboolean err = FALSE;
+
+		/* Only the first structure is used (multiple incoming structures don't make sense */
+		structure = gst_caps_get_structure(incoming_caps, 0);
+
+		if (!gst_structure_get_int(structure, "rate", &rate))
+		{
+			err = TRUE;
+			GST_ERROR_OBJECT(dec, "Incoming caps do not have a rate value");
+		}
+		if (!gst_structure_get_int(structure, "channels", &channels))
+		{
+			err = TRUE;
+			GST_ERROR_OBJECT(dec, "Incoming caps do not have a channel value");
+		}
+
+		if (err)
+			return FALSE;
+	}
+
+	/* Get the caps that are allowed by downstream */
+	allowed_srccaps = gst_pad_get_allowed_caps(GST_AUDIO_DECODER_SRC_PAD(dec));
+
+	/* Go through all allowed caps, pick the first one that matches */
+	for (structure_nr = 0; structure_nr < gst_caps_get_size(allowed_srccaps); ++structure_nr)
+	{
+		GstStructure *structure;
+		GstCaps *candidate_srccaps;
+		char const *media_type;
+		int width;
+		gboolean signed_, width_available, is_integer, set_caps_succeeded;
+		int encoding;
+
+		width_available = FALSE;
+		is_integer = FALSE;
+
+		structure = gst_caps_get_structure(allowed_srccaps, structure_nr);
+		media_type = gst_structure_get_name(structure);
+
+		if (gst_structure_get_int(structure, "width", &width))
+		{
+			width_available = TRUE;
+		}
+		if (!gst_structure_get_boolean(structure, "signed", &signed_))
+		{
+			signed_ = TRUE; /* default value */
+		}
+
+		if (!gst_mpg123_determine_encoding(media_type, width, width_available, signed_, &is_integer, &encoding))
+		{
+			GST_TRACE_OBJECT(dec, "mpg123 cannot use caps %" GST_PTR_FORMAT, structure);
+			continue;
+		}
+
+		{
+			int err;
+
+			err = mpg123_format(decoder->handle, rate, channels, encoding);
+			if (err != MPG123_OK)
+			{
+				GST_TRACE_OBJECT(dec, "mpg123 cannot use caps %" GST_PTR_FORMAT " because mpg123_format() failed: %s", structure, mpg123_plain_strerror(err));
+				continue;
+			}
+		}
+
+		candidate_srccaps = gst_caps_new_simple(
+			media_type,
+ 			"rate", G_TYPE_INT, rate,
+ 			"channels", G_TYPE_INT, channels,
+ 			"endianness", G_TYPE_INT, G_BYTE_ORDER,
+ 			NULL
+ 		);
+
+		if (width_available)
+		{
+ 			gst_caps_set_simple(
+				candidate_srccaps,
+				"width", G_TYPE_INT, width,
+				"depth", G_TYPE_INT, width,
+				NULL
+			);
+		};
+
+		if (is_integer)
+		{
+ 			gst_caps_set_simple(
+				candidate_srccaps,
+ 				"signed", G_TYPE_BOOLEAN, signed_,
+ 				NULL
+ 			);
+		}
+
+		GST_TRACE_OBJECT(dec, "Setting srccaps %" GST_PTR_FORMAT, candidate_srccaps);
+
+		set_caps_succeeded = gst_pad_set_caps(GST_AUDIO_DECODER_SRC_PAD(dec), candidate_srccaps);
+		gst_caps_unref(candidate_srccaps);
+
+		if (set_caps_succeeded)
+		{
+			match_found = TRUE;
+			break;
+		}
+	}
+
+	gst_caps_unref(allowed_srccaps);
+
+	return match_found;
 }
 
 

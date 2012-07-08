@@ -51,8 +51,6 @@ def configure(conf):
 	# test for mpg123
 	conf.check_cfg(package='libmpg123', uselib_store='MPG123', args='--cflags --libs', mandatory=1)
 	sampleformats_to_test_for = [ \
-		{ "label" :  "8 bit unsigned", "name" : "MPG123_ENC_UNSIGNED_8"  }, \
-		{ "label" :  "8 bit signed",   "name" : "MPG123_ENC_SIGNED_8"    }, \
 		{ "label" : "16 bit unsigned", "name" : "MPG123_ENC_UNSIGNED_16" }, \
 		{ "label" : "16 bit signed",   "name" : "MPG123_ENC_SIGNED_16"   }, \
 		{ "label" : "24 bit unsigned", "name" : "MPG123_ENC_UNSIGNED_24" }, \
@@ -60,9 +58,7 @@ def configure(conf):
 		{ "label" : "32 bit unsigned", "name" : "MPG123_ENC_UNSIGNED_32" }, \
 		{ "label" : "32 bit signed",   "name" : "MPG123_ENC_SIGNED_32"   }, \
 		{ "label" : "32 bit float",    "name" : "MPG123_ENC_FLOAT_32"    }, \
-		{ "label" : "64 bit float",    "name" : "MPG123_ENC_FLOAT_64"    }, \
-		{ "label" :  "8 bit A-law",    "name" : "MPG123_ENC_ALAW_8"      }, \
-		{ "label" :  "8 bit mu-law",   "name" : "MPG123_ENC_ULAW_8"      } \
+		{ "label" : "64 bit float",    "name" : "MPG123_ENC_FLOAT_64"    }  \
 	]
 	for sampleformat in sampleformats_to_test_for:
 		conf.check_cc( \
