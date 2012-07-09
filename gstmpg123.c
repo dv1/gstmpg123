@@ -19,7 +19,6 @@
 
 
 
-#include <assert.h>
 #include <stdlib.h>
 #include <string.h>
 #include <config.h>
@@ -100,9 +99,9 @@ static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE(
 static void gst_mpg123_finalize(GObject *object);
 static gboolean gst_mpg123_start(GstAudioDecoder *dec);
 static gboolean gst_mpg123_stop(GstAudioDecoder *dec);
-static void gst_mpg123_push_output_buffer(GstMpg123 *decoder, GstBuffer *output_buffer, size_t num_decoded_bytes);
+static void gst_mpg123_push_output_buffer(GstMpg123 *mpg123_decoder, size_t num_decoded_bytes);
 static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *buffer);
-static gboolean gst_mpg123_determine_encoding(char const *media_type, int const width, gboolean const width_available, gboolean const signed_, gboolean *is_integer, int *encoding);
+static gboolean gst_mpg123_determine_encoding(char const *media_type, int const width, gboolean const signed_, gboolean *is_integer, int *encoding);
 static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_caps);
 
 
@@ -157,38 +156,47 @@ void gst_mpg123_class_init(GstMpg123Class *klass)
 }
 
 
-void gst_mpg123_init(GstMpg123 *decoder, GstMpg123Class *klass)
+void gst_mpg123_init(GstMpg123 *mpg123_decoder, GstMpg123Class *klass)
 {
 	klass = klass;
-	decoder->handle = NULL;
+	mpg123_decoder->handle = NULL;
 }
 
 
 static void gst_mpg123_finalize(GObject *object)
 {
-	GstMpg123 *decoder = GST_MPG123(object);
-	if (G_LIKELY(decoder->handle != NULL))
+	GstMpg123 *mpg123_decoder = GST_MPG123(object);
+	if (G_LIKELY(mpg123_decoder->handle != NULL))
 	{
-		mpg123_delete(decoder->handle);
-		decoder->handle = NULL;
+		mpg123_delete(mpg123_decoder->handle);
+		mpg123_decoder->handle = NULL;
 	}
 }
 
 
 static gboolean gst_mpg123_start(GstAudioDecoder *dec)
 {
-	GstMpg123 *decoder;
+	GstMpg123 *mpg123_decoder;
 	int error;
 
-	decoder = GST_MPG123(dec);
+	mpg123_decoder = GST_MPG123(dec);
 	error = 0;
 
-	decoder->handle = mpg123_new(NULL, &error);
-	mpg123_format_none(decoder->handle);
-	mpg123_param(decoder->handle, MPG123_ADD_FLAGS, MPG123_GAPLESS, 0);
-	mpg123_param(decoder->handle, MPG123_ADD_FLAGS, MPG123_SEEKBUFFER, 0); /* this tells mpg123 to use a small read-ahead buffer for better MPEG sync; essential for MP3 radio streams */
-	mpg123_param(decoder->handle, MPG123_RESYNC_LIMIT, -1, 0); /* sets the resync limit to the end of the stream (e.g. don't give up prematurely) */
-	mpg123_open_feed(decoder->handle);
+	mpg123_decoder->handle = mpg123_new(NULL, &error);
+	mpg123_decoder->output_buffer = NULL;
+
+	/*
+	Initially, the mpg123 handle comes with a set of default formats supported. This clears this set. 
+	This is necessary, since only one format shall be supported (see set_format for more).
+	*/
+	mpg123_format_none(mpg123_decoder->handle);
+
+	mpg123_param(mpg123_decoder->handle, MPG123_ADD_FLAGS,    MPG123_GAPLESS,    0); /* Enables support for gapless decoding (MP3 bitstream must have LAME/Xing extensions for this */
+	mpg123_param(mpg123_decoder->handle, MPG123_ADD_FLAGS,    MPG123_SEEKBUFFER, 0); /* Tells mpg123 to use a small read-ahead buffer for better MPEG sync; essential for MP3 radio streams */
+	mpg123_param(mpg123_decoder->handle, MPG123_RESYNC_LIMIT, -1,                0); /* Sets the resync limit to the end of the stream (e.g. don't give up prematurely) */
+
+	/* Open in feed mode (= encoded data is fed manually into the handle). */
+	mpg123_open_feed(mpg123_decoder->handle);
 
 	if (G_UNLIKELY(error != MPG123_OK))
 	{
@@ -203,30 +211,46 @@ static gboolean gst_mpg123_start(GstAudioDecoder *dec)
 
 static gboolean gst_mpg123_stop(GstAudioDecoder *dec)
 {
-	GstMpg123 *decoder = GST_MPG123(dec);
+	GstMpg123 *mpg123_decoder = GST_MPG123(dec);
 
-	if (G_LIKELY(decoder->handle != NULL))
+	if (G_LIKELY(mpg123_decoder->handle != NULL))
 	{
-		mpg123_delete(decoder->handle);
-		decoder->handle = NULL;
+		mpg123_delete(mpg123_decoder->handle);
+		mpg123_decoder->handle = NULL;
+	}
+
+	if (mpg123_decoder->output_buffer != NULL)
+	{
+		gst_buffer_unref(mpg123_decoder->output_buffer);
+		mpg123_decoder->output_buffer = NULL;
 	}
 
 	return TRUE;
 }
 
 
-static void gst_mpg123_push_output_buffer(GstMpg123 *decoder, GstBuffer *output_buffer, size_t num_decoded_bytes)
+/**
+ * Adjusts the size of the output buffer and pushes it downstream.
+ * The special case num_decoded_bytes == 0 means that nothing was actually decoded; this function
+ * just logs that and then exits then.
+ */
+static void gst_mpg123_push_output_buffer(GstMpg123 *mpg123_decoder, size_t num_decoded_bytes)
 {
 	/* This usually happens at the beginning, before mpg123 has enough information to actually decode something. */
 	if (num_decoded_bytes == 0)
 	{
-		gst_buffer_unref(output_buffer);
+		GST_TRACE_OBJECT(mpg123_decoder, "Nothing was decoded, so there is nothing to push. Keeping output buffer for later reuse.");
 		return;
 	}
 
-	GST_BUFFER_SIZE(output_buffer) = num_decoded_bytes;
-	GST_TRACE_OBJECT(decoder, "Pushing output buffer with %d byte", num_decoded_bytes);
-	gst_audio_decoder_finish_frame(GST_AUDIO_DECODER(decoder), output_buffer, 1);
+	/* Should never happen - buffers are initially set to the maximum size a decoded MPEG audio buffer can be */
+	g_assert_cmpuint( num_decoded_bytes , <= , GST_BUFFER_SIZE(mpg123_decoder->output_buffer) );
+
+	/* First, adjust the buffer size to what was actually decoded */
+	GST_BUFFER_SIZE(mpg123_decoder->output_buffer) = num_decoded_bytes;
+	GST_TRACE_OBJECT(mpg123_decoder, "Pushing output buffer with %d byte", num_decoded_bytes);
+	gst_audio_decoder_finish_frame(GST_AUDIO_DECODER(mpg123_decoder), mpg123_decoder->output_buffer, 1);
+	mpg123_decoder->output_buffer = NULL;
 }
 
 
@@ -234,63 +258,83 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 {
 	unsigned char const *inmemory;
 	size_t inmemsize;
-	GstMpg123 *decoder;
-	GstBuffer *output_buffer;
+	GstMpg123 *mpg123_decoder;
 
 	if (G_UNLIKELY(!buffer))
 		return GST_FLOW_OK;
 
 	inmemory = (unsigned char const *)(GST_BUFFER_DATA(buffer));
 	inmemsize = GST_BUFFER_SIZE(buffer);
-	decoder = GST_MPG123(dec);
+	mpg123_decoder = GST_MPG123(dec);
 
 	unsigned char *outmemory;
 	size_t outmemsize;
 	int decode_error;
 	size_t num_decoded_bytes = 0;
 
-	GST_TRACE_OBJECT(decoder, "About to decode input data and push decoded samples downstream");
+	GST_TRACE_OBJECT(mpg123_decoder, "About to decode input data and push decoded samples downstream");
 
+	/* If no output buffer exists, create one */
+	if (mpg123_decoder->output_buffer == NULL)
 	{
+		/* Create an output buffer, with the maximum possible size allowed by the MPEG spec */
+
 		GstFlowReturn alloc_error;
-		GST_TRACE_OBJECT(decoder, "Creating new output buffer with caps %" GST_PTR_FORMAT, GST_PAD_CAPS(GST_AUDIO_DECODER_SRC_PAD(decoder)));
+		GST_TRACE_OBJECT(dec, "Creating new output buffer with caps %" GST_PTR_FORMAT, GST_PAD_CAPS(GST_AUDIO_DECODER_SRC_PAD(dec)));
 		alloc_error = gst_pad_alloc_buffer(
-			GST_AUDIO_DECODER_SRC_PAD(decoder),
+			GST_AUDIO_DECODER_SRC_PAD(dec),
 			GST_BUFFER_OFFSET_NONE,
 			INITIAL_OUTPUT_BUFFER_SIZE,
-			GST_PAD_CAPS(GST_AUDIO_DECODER_SRC_PAD(decoder)),
-			&output_buffer
+			GST_PAD_CAPS(GST_AUDIO_DECODER_SRC_PAD(dec)),
+			&(mpg123_decoder->output_buffer)
 		);
 		if (alloc_error != GST_FLOW_OK)
 		{
-			/* TODO: if decoder->output_buffer is not NULL after the alloc call, should it be unref'd? */
+			/* TODO: if mpg123_decoder->output_buffer is not NULL after the alloc call, should it be unref'd? */
 			GstElement *element = GST_ELEMENT(dec);
 			GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Creating new output buffer failed"));
 			return alloc_error;
 		}
 	}
+	else
+	{
+		/* An output buffer already exists - reuse it */
+		g_assert_cmpuint( INITIAL_OUTPUT_BUFFER_SIZE , == , GST_BUFFER_SIZE(mpg123_decoder->output_buffer) );
+		GST_TRACE_OBJECT(mpg123_decoder, "An output buffer already exists - reusing");
+	}
 
-	outmemory = (unsigned char *) GST_BUFFER_DATA(output_buffer);
-	outmemsize = GST_BUFFER_SIZE(output_buffer);
-	decode_error = mpg123_decode(decoder->handle, inmemory, inmemsize, outmemory, outmemsize, &num_decoded_bytes);
+	outmemory = (unsigned char *) GST_BUFFER_DATA(mpg123_decoder->output_buffer);
+	outmemsize = GST_BUFFER_SIZE(mpg123_decoder->output_buffer);
+
+	/* The actual decoding */
+	decode_error = mpg123_decode(mpg123_decoder->handle, inmemory, inmemsize, outmemory, outmemsize, &num_decoded_bytes);
 
 	switch (decode_error)
 	{
-		/* NEW_FORMAT information is redundant; upstream told us about the rate and number of channels, downstream about the sample format */
+		/*
+		NEW_FORMAT information is redundant; upstream told us about the rate and number of channels, downstream about the sample format
+		Therefore, the new format information is just ignored
+		*/
 		case MPG123_NEW_FORMAT:
 		case MPG123_NEED_MORE:
 		case MPG123_OK:
-			gst_mpg123_push_output_buffer(decoder, output_buffer, num_decoded_bytes);
+			gst_mpg123_push_output_buffer(mpg123_decoder, num_decoded_bytes);
 			break;
+
+		/* If this happens, then the upstream parser somehow missed the ending of the bitstream */
 		case MPG123_DONE:
-			GST_DEBUG_OBJECT(decoder, "mpg123 is done decoding");
-			gst_mpg123_push_output_buffer(decoder, output_buffer, num_decoded_bytes);
+			GST_DEBUG_OBJECT(dec, "mpg123 is done decoding");
+			gst_mpg123_push_output_buffer(mpg123_decoder, num_decoded_bytes);
 			return GST_FLOW_UNEXPECTED;
+
+		/* Anything else is considered an error */
 		default:
 		{
 			GstElement *element = GST_ELEMENT(dec);
 			GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Decoding error: %s", mpg123_plain_strerror(decode_error)));
-			gst_buffer_unref(output_buffer);
+			gst_buffer_unref(mpg123_decoder->output_buffer);
+			mpg123_decoder->output_buffer = NULL;
+
 			return GST_FLOW_ERROR;
 		}
 	}
@@ -299,18 +343,22 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 }
 
 
-static gboolean gst_mpg123_determine_encoding(char const *media_type, int const width, gboolean const width_available, gboolean const signed_, gboolean *is_integer, int *encoding)
+/**
+ * Using the given media type, width (if available), sign, and determines the corresponding mpg123 encoding
+ * (also determines if it is an integer format).
+ */
+static gboolean gst_mpg123_determine_encoding(char const *media_type, int const *width, gboolean const signed_, gboolean *is_integer, int *encoding)
 {
 	if (strcmp(media_type, media_type_int) == 0)
 	{
 		*is_integer = TRUE;
 
-		if (!width_available)
+		if (width == NULL)
 			return FALSE;
 
 		if (signed_)
 		{
-			switch (width)
+			switch (*width)
 			{
 #ifdef MPG123_ENC_SIGNED_16_SUPPORTED
 				case 16: *encoding = MPG123_ENC_SIGNED_16; break;
@@ -327,7 +375,7 @@ static gboolean gst_mpg123_determine_encoding(char const *media_type, int const 
 		}
 		else
 		{
-			switch (width)
+			switch (*width)
 			{
 #ifdef MPG123_ENC_UNSIGNED_16_SUPPORTED
 				case 16: *encoding = MPG123_ENC_UNSIGNED_16; break;
@@ -345,10 +393,10 @@ static gboolean gst_mpg123_determine_encoding(char const *media_type, int const 
 	}
 	else if (strcmp(media_type, media_type_float) == 0)
 	{
-		if (!width_available)
+		if (width = NULL)
 			return FALSE;
 
-		switch (width)
+		switch (*width)
 		{
 #ifdef MPG123_ENC_FLOAT_32_SUPPORTED
 			case 32: *encoding = MPG123_ENC_FLOAT_32; break;
@@ -369,6 +417,16 @@ static gboolean gst_mpg123_determine_encoding(char const *media_type, int const 
 static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_caps)
 {
 /*
+	Using the parsed information upstream, and the list of allowed caps downstream, this code
+	tries to find a suitable format. It is important to keep in mind that the rate and number of channels
+	should never deviate from the one the bitstream has, otherwise mpg123 has to mix channels and/or
+	resample (and as its docs say, its internal resampler is very crude). The sample format, however,
+	can be chosen freely, because the MPEG specs do not mandate any special format.
+	Therefore, rate and number of channels are taken from upstream (which parsed the MPEG frames, therefore
+	the incoming_caps contain exactly the rate and number of channels the bitstream actually has), while
+	the sample format is chosen by trying out all caps that are allowed by downstream. This way, the output
+	is adjusted to what the downstream prefers.
+
 	STEPS:
 
 	1. get rate and channels from incoming_caps
@@ -383,12 +441,12 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 
 
 	int rate, channels;
-	GstMpg123 *decoder;
+	GstMpg123 *mpg123_decoder;
 	GstCaps *allowed_srccaps;
 	guint structure_nr;
 	gboolean match_found = FALSE;
 
-	decoder = GST_MPG123(dec);
+	mpg123_decoder = GST_MPG123(dec);
 
 	/* Get rate and channels from incoming_caps */
 	{
@@ -445,7 +503,7 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 			signed_ = TRUE; /* default value */
 		}
 
-		if (!gst_mpg123_determine_encoding(media_type, width, width_available, signed_, &is_integer, &encoding))
+		if (!gst_mpg123_determine_encoding(media_type, width_available ? (&width) : NULL, signed_, &is_integer, &encoding))
 		{
 			GST_TRACE_OBJECT(dec, "mpg123 cannot use caps with rate %d width %d (available = %d) signed %d", rate, width, width_available, signed_);
 			continue;
@@ -454,7 +512,7 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 		{
 			int err;
 
-			err = mpg123_format(decoder->handle, rate, channels, encoding);
+			err = mpg123_format(mpg123_decoder->handle, rate, channels, encoding);
 			if (err != MPG123_OK)
 			{
 				GST_TRACE_OBJECT(dec, "mpg123 cannot use caps %" GST_PTR_FORMAT " because mpg123_format() failed: %s", structure, mpg123_plain_strerror(err));

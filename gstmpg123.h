@@ -45,6 +45,7 @@ struct _GstMpg123
 {
 	GstAudioDecoder parent;
 	mpg123_handle *handle;
+	GstBuffer *output_buffer;
 };
 
 
