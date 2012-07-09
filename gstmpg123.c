@@ -101,7 +101,7 @@ static gboolean gst_mpg123_start(GstAudioDecoder *dec);
 static gboolean gst_mpg123_stop(GstAudioDecoder *dec);
 static void gst_mpg123_push_output_buffer(GstMpg123 *mpg123_decoder, size_t num_decoded_bytes);
 static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *buffer);
-static gboolean gst_mpg123_determine_encoding(char const *media_type, int const width, gboolean const signed_, gboolean *is_integer, int *encoding);
+static gboolean gst_mpg123_determine_encoding(char const *media_type, int const *width, gboolean const signed_, gboolean *is_integer, int *encoding);
 static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_caps);
 
 
@@ -393,7 +393,7 @@ static gboolean gst_mpg123_determine_encoding(char const *media_type, int const 
 	}
 	else if (strcmp(media_type, media_type_float) == 0)
 	{
-		if (width = NULL)
+		if (width == NULL)
 			return FALSE;
 
 		switch (*width)
