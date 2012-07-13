@@ -573,7 +573,7 @@ static gboolean plugin_init(GstPlugin *plugin)
 }
 
 
-#define PACKAGE "package"
+#define PACKAGE "gstmpg123"
 
 
 GST_PLUGIN_DEFINE(
@@ -585,6 +585,6 @@ GST_PLUGIN_DEFINE(
 	"1.0",
 	"LGPL",
 	PACKAGE,
-	"http://no-url-yet"
+	"https://github.com/dv1/gstmpg123"
 )
 
