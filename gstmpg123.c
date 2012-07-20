@@ -103,6 +103,7 @@ static void gst_mpg123_push_output_buffer(GstMpg123 *mpg123_decoder, size_t num_
 static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *buffer);
 static gboolean gst_mpg123_determine_encoding(char const *media_type, int const *width, gboolean const signed_, gboolean *is_integer, int *encoding);
 static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_caps);
+static void gst_mpg123_flush(GstAudioDecoder *dec, gboolean hard);
 
 
 GST_BOILERPLATE(GstMpg123, gst_mpg123, GstAudioDecoder, GST_TYPE_AUDIO_DECODER)
@@ -143,10 +144,11 @@ void gst_mpg123_class_init(GstMpg123Class *klass)
 
 	object_class->finalize = gst_mpg123_finalize;
 
-	base_class->start = GST_DEBUG_FUNCPTR(gst_mpg123_start);
-	base_class->stop = GST_DEBUG_FUNCPTR(gst_mpg123_stop);
+	base_class->start        = GST_DEBUG_FUNCPTR(gst_mpg123_start);
+	base_class->stop         = GST_DEBUG_FUNCPTR(gst_mpg123_stop);
 	base_class->handle_frame = GST_DEBUG_FUNCPTR(gst_mpg123_handle_frame);
-	base_class->set_format = GST_DEBUG_FUNCPTR(gst_mpg123_set_format);
+	base_class->set_format   = GST_DEBUG_FUNCPTR(gst_mpg123_set_format);
+	base_class->flush        = GST_DEBUG_FUNCPTR(gst_mpg123_flush);
 
 	error = mpg123_init();
 	if (G_UNLIKELY(error != MPG123_OK))
@@ -196,12 +198,15 @@ static gboolean gst_mpg123_start(GstAudioDecoder *dec)
 	mpg123_param(mpg123_decoder->handle, MPG123_RESYNC_LIMIT, -1,                0); /* Sets the resync limit to the end of the stream (e.g. don't give up prematurely) */
 
 	/* Open in feed mode (= encoded data is fed manually into the handle). */
-	mpg123_open_feed(mpg123_decoder->handle);
+	error = mpg123_open_feed(mpg123_decoder->handle);
 
 	if (G_UNLIKELY(error != MPG123_OK))
 	{
 		GstElement *element = GST_ELEMENT(dec);
 		GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Error opening mpg123 feed: %s", mpg123_plain_strerror(error)));
+		mpg123_close(mpg123_decoder->handle);
+		mpg123_delete(mpg123_decoder->handle);
+		mpg123_decoder->handle = NULL;
 		return FALSE;
 	}
 
@@ -215,6 +220,7 @@ static gboolean gst_mpg123_stop(GstAudioDecoder *dec)
 
 	if (G_LIKELY(mpg123_decoder->handle != NULL))
 	{
+		mpg123_close(mpg123_decoder->handle);
 		mpg123_delete(mpg123_decoder->handle);
 		mpg123_decoder->handle = NULL;
 	}
@@ -267,6 +273,13 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 	inmemsize = GST_BUFFER_SIZE(buffer);
 	mpg123_decoder = GST_MPG123(dec);
 
+	if (G_UNLIKELY(mpg123_decoder->handle == NULL))
+	{
+		GstElement *element = GST_ELEMENT(dec);
+		GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("mpg123 handle is NULL"));
+		return GST_FLOW_ERROR;
+	}
+
 	unsigned char *outmemory;
 	size_t outmemsize;
 	int decode_error;
@@ -290,7 +303,10 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 		);
 		if (alloc_error != GST_FLOW_OK)
 		{
-			/* TODO: if mpg123_decoder->output_buffer is not NULL after the alloc call, should it be unref'd? */
+			/*
+			The docs say that in case of an error, the created GstBuffer should not be used. Looking at the
+			GstPad code shows that the buffer is automatically unref'd in case of an error, so no unref call is made here.
+			*/
 			GstElement *element = GST_ELEMENT(dec);
 			GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Creating new output buffer failed"));
 			return alloc_error;
@@ -448,6 +464,13 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 
 	mpg123_decoder = GST_MPG123(dec);
 
+	if (G_UNLIKELY(mpg123_decoder->handle == NULL))
+	{
+		GstElement *element = GST_ELEMENT(dec);
+		GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("mpg123 handle is NULL"));
+		return FALSE;
+	}
+
 	/* Get rate and channels from incoming_caps */
 	{
 		GstStructure *structure;
@@ -563,6 +586,45 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 
 	return match_found;
 }
+
+
+static void gst_mpg123_flush(GstAudioDecoder *dec, gboolean hard)
+{
+	int error;
+	GstMpg123 *mpg123_decoder;
+
+	hard = hard;
+
+	GST_DEBUG_OBJECT(dec, "Flushing decoder");
+
+	mpg123_decoder = GST_MPG123(dec);
+
+	if (G_UNLIKELY(mpg123_decoder->handle == NULL))
+	{
+		GstElement *element = GST_ELEMENT(dec);
+		GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("mpg123 handle is NULL"));
+		return;
+	}
+
+	/* Flush by reopening the feed */
+	mpg123_close(mpg123_decoder->handle);
+	error = mpg123_open_feed(mpg123_decoder->handle);
+
+	if (G_UNLIKELY(error != MPG123_OK))
+	{
+		GstElement *element = GST_ELEMENT(dec);
+		GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Error reopening mpg123 feed: %s", mpg123_plain_strerror(error)));
+		mpg123_close(mpg123_decoder->handle);
+		mpg123_delete(mpg123_decoder->handle);
+		mpg123_decoder->handle = NULL;
+	}
+
+	/*
+	opening/closing feeds do not affect the format defined by the mpg123_format() call that was made in gst_mpg123_set_format(),
+	and since the up/downstream caps are not expected to change here, no mpg123_format() calls are done
+	*/
+}
+
 
 
 
