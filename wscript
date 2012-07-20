@@ -44,12 +44,12 @@ def configure(conf):
 	conf.check_tool('compiler_cc')
 
 	# test for GStreamer libraries
-	conf.check_cfg(package='gstreamer-0.10', uselib_store='GSTREAMER', args='--cflags --libs', mandatory=1)
-	conf.check_cfg(package='gstreamer-base-0.10', uselib_store='GSTREAMER_BASE', args='--cflags --libs', mandatory=1)
-	conf.check_cfg(package='gstreamer-audio-0.10', uselib_store='GSTREAMER_AUDIO', args='--cflags --libs', mandatory=1)
+	conf.check_cfg(package='gstreamer-0.10 >= 0.10.36', uselib_store='GSTREAMER', args='--cflags --libs', mandatory=1)
+	conf.check_cfg(package='gstreamer-base-0.10 >= 0.10.36', uselib_store='GSTREAMER_BASE', args='--cflags --libs', mandatory=1)
+	conf.check_cfg(package='gstreamer-audio-0.10 >= 0.10.36', uselib_store='GSTREAMER_AUDIO', args='--cflags --libs', mandatory=1)
 
 	# test for mpg123
-	conf.check_cfg(package='libmpg123', uselib_store='MPG123', args='--cflags --libs', mandatory=1)
+	conf.check_cfg(package='libmpg123 >= 1.12.1', uselib_store='MPG123', args='--cflags --libs', mandatory=1)
 	sampleformats_to_test_for = [ \
 		{ "label" : "16 bit unsigned", "name" : "MPG123_ENC_UNSIGNED_16" }, \
 		{ "label" : "16 bit signed",   "name" : "MPG123_ENC_SIGNED_16"   }, \
