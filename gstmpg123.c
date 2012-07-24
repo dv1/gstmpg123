@@ -210,6 +210,8 @@ static gboolean gst_mpg123_start(GstAudioDecoder *dec)
 		return FALSE;
 	}
 
+	GST_DEBUG_OBJECT(dec, "mpg123 decoder started");
+
 	return TRUE;
 }
 
@@ -230,6 +232,8 @@ static gboolean gst_mpg123_stop(GstAudioDecoder *dec)
 		gst_buffer_unref(mpg123_decoder->output_buffer);
 		mpg123_decoder->output_buffer = NULL;
 	}
+
+	GST_DEBUG_OBJECT(dec, "mpg123 decoder stopped");
 
 	return TRUE;
 }
@@ -528,7 +532,7 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 
 		if (!gst_mpg123_determine_encoding(media_type, width_available ? (&width) : NULL, signed_, &is_integer, &encoding))
 		{
-			GST_TRACE_OBJECT(dec, "mpg123 cannot use caps with rate %d width %d (available = %d) signed %d", rate, width, width_available, signed_);
+			GST_DEBUG_OBJECT(dec, "mpg123 cannot use caps with rate %d width %d (available = %d) signed %d", rate, width, width_available, signed_);
 			continue;
 		}
 
@@ -538,7 +542,7 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 			err = mpg123_format(mpg123_decoder->handle, rate, channels, encoding);
 			if (err != MPG123_OK)
 			{
-				GST_TRACE_OBJECT(dec, "mpg123 cannot use caps %" GST_PTR_FORMAT " because mpg123_format() failed: %s", structure, mpg123_plain_strerror(err));
+				GST_DEBUG_OBJECT(dec, "mpg123 cannot use caps %" GST_PTR_FORMAT " because mpg123_format() failed: %s", structure, mpg123_plain_strerror(err));
 				continue;
 			}
 		}
@@ -570,7 +574,7 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
  			);
 		}
 
-		GST_TRACE_OBJECT(dec, "Setting srccaps %" GST_PTR_FORMAT, candidate_srccaps);
+		GST_DEBUG_OBJECT(dec, "Setting srccaps %" GST_PTR_FORMAT, candidate_srccaps);
 
 		set_caps_succeeded = gst_pad_set_caps(GST_AUDIO_DECODER_SRC_PAD(dec), candidate_srccaps);
 		gst_caps_unref(candidate_srccaps);
