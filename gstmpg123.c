@@ -231,6 +231,7 @@ static GstFlowReturn gst_mpg123_push_decoded_bytes(GstMpg123 *mpg123_decoder, un
 
 	if ((num_decoded_bytes == 0) || (decoded_bytes == NULL))
 	{
+		GST_TRACE_OBJECT(mpg123_decoder, "Nothing was decoded -> no output buffer to push");
 		return gst_audio_decoder_finish_frame(dec, NULL, 1);
 	}
 
@@ -241,6 +242,8 @@ static GstFlowReturn gst_mpg123_push_decoded_bytes(GstMpg123 *mpg123_decoder, un
 		GST_PAD_CAPS(GST_AUDIO_DECODER_SRC_PAD(dec)),
 		&output_buffer
 	);
+
+	GST_TRACE_OBJECT(mpg123_decoder, "Pushing output buffer with %u byte and caps %" GST_PTR_FORMAT, num_decoded_bytes, GST_BUFFER_CAPS(output_buffer));
 
 	if (alloc_error != GST_FLOW_OK)
 	{
