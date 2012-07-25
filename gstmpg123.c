@@ -30,20 +30,6 @@ GST_DEBUG_CATEGORY_STATIC(mpg123_debug);
 
 
 /*
-MPEG1 layer 1 defines 384 samples per frame, layer 2 and 3 define 1152 per frame.
-This applies to VBR and ABR streams as well.
-The maximum number of channels is 2.
-The biggest sample format is 64-bit float (8 byte).
--> Use these for the initial output buffer size, which shall be the largest size the decoder
-can produce. After decoding, adjust the buffer size to the actual decoded size.
-*/
-enum
-{
-	INITIAL_OUTPUT_BUFFER_SIZE = 1152 * 8 * 2
-};
-
-
-/*
 Omitted sample formats that mpg123 supports (or at least can support):
 8bit integer signed
 8bit integer unsigned
@@ -99,7 +85,7 @@ static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE(
 static void gst_mpg123_finalize(GObject *object);
 static gboolean gst_mpg123_start(GstAudioDecoder *dec);
 static gboolean gst_mpg123_stop(GstAudioDecoder *dec);
-static void gst_mpg123_push_output_buffer(GstMpg123 *mpg123_decoder, size_t num_decoded_bytes);
+static GstFlowReturn gst_mpg123_push_decoded_bytes(GstMpg123 *mpg123_decoder, unsigned char const *decoded_bytes, size_t const num_decoded_bytes);
 static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *buffer);
 static gboolean gst_mpg123_determine_encoding(char const *media_type, int const *width, gboolean const signed_, gboolean *is_integer, int *encoding);
 static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_caps);
@@ -185,7 +171,7 @@ static gboolean gst_mpg123_start(GstAudioDecoder *dec)
 	error = 0;
 
 	mpg123_decoder->handle = mpg123_new(NULL, &error);
-	mpg123_decoder->output_buffer = NULL;
+	mpg123_decoder->frame_offset = 0;
 
 	/*
 	Initially, the mpg123 handle comes with a set of default formats supported. This clears this set. 
@@ -227,40 +213,42 @@ static gboolean gst_mpg123_stop(GstAudioDecoder *dec)
 		mpg123_decoder->handle = NULL;
 	}
 
-	if (mpg123_decoder->output_buffer != NULL)
-	{
-		gst_buffer_unref(mpg123_decoder->output_buffer);
-		mpg123_decoder->output_buffer = NULL;
-	}
-
 	GST_DEBUG_OBJECT(dec, "mpg123 decoder stopped");
 
 	return TRUE;
 }
 
 
-/**
- * Adjusts the size of the output buffer and pushes it downstream.
- * The special case num_decoded_bytes == 0 means that nothing was actually decoded; this function
- * just logs that and then exits then.
- */
-static void gst_mpg123_push_output_buffer(GstMpg123 *mpg123_decoder, size_t num_decoded_bytes)
+static GstFlowReturn gst_mpg123_push_decoded_bytes(GstMpg123 *mpg123_decoder, unsigned char const *decoded_bytes, size_t const num_decoded_bytes)
 {
-	/* This usually happens at the beginning, before mpg123 has enough information to actually decode something. */
-	if (num_decoded_bytes == 0)
+	GstBuffer *output_buffer;
+	GstFlowReturn alloc_error;
+	GstAudioDecoder *dec;
+
+	if ((num_decoded_bytes == 0) || (decoded_bytes == NULL))
+		return GST_FLOW_OK; // TODO: call finish_frame here?
+
+	output_buffer = NULL;
+	dec = GST_AUDIO_DECODER(mpg123_decoder);
+
+	alloc_error = gst_pad_alloc_buffer(
+		GST_AUDIO_DECODER_SRC_PAD(dec),
+		GST_BUFFER_OFFSET_NONE,
+		num_decoded_bytes,
+		GST_PAD_CAPS(GST_AUDIO_DECODER_SRC_PAD(dec)),
+		&output_buffer
+	);
+
+	if (alloc_error != GST_FLOW_OK)
 	{
-		GST_TRACE_OBJECT(mpg123_decoder, "Nothing was decoded, so there is nothing to push. Keeping output buffer for later reuse.");
-		return;
+		/* This is necessary to advance playback in time, even when nothing was decoded. */
+		return gst_audio_decoder_finish_frame(dec, NULL, 1);
 	}
-
-	/* Should never happen - buffers are initially set to the maximum size a decoded MPEG audio buffer can be */
-	g_assert_cmpuint( num_decoded_bytes , <= , GST_BUFFER_SIZE(mpg123_decoder->output_buffer) );
-
-	/* First, adjust the buffer size to what was actually decoded */
-	GST_BUFFER_SIZE(mpg123_decoder->output_buffer) = num_decoded_bytes;
-	GST_TRACE_OBJECT(mpg123_decoder, "Pushing output buffer with %d byte", num_decoded_bytes);
-	gst_audio_decoder_finish_frame(GST_AUDIO_DECODER(mpg123_decoder), mpg123_decoder->output_buffer, 1);
-	mpg123_decoder->output_buffer = NULL;
+	else
+	{
+		memcpy(GST_BUFFER_DATA(output_buffer), decoded_bytes, num_decoded_bytes);
+		return gst_audio_decoder_finish_frame(dec, output_buffer, 1);
+	}
 }
 
 
@@ -269,6 +257,9 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 	unsigned char const *inmemory;
 	size_t inmemsize;
 	GstMpg123 *mpg123_decoder;
+	int decode_error;
+	unsigned char *decoded_bytes;
+	size_t num_decoded_bytes;
 
 	if (G_UNLIKELY(!buffer))
 		return GST_FLOW_OK;
@@ -284,55 +275,16 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 		return GST_FLOW_ERROR;
 	}
 
-	unsigned char *outmemory;
-	size_t outmemsize;
-	int decode_error;
-	size_t num_decoded_bytes = 0;
-
-	GST_TRACE_OBJECT(mpg123_decoder, "About to decode input data and push decoded samples downstream");
-
-	/* If no output buffer exists, create one */
-	if (mpg123_decoder->output_buffer == NULL)
-	{
-		/* Create an output buffer, with the maximum possible size allowed by the MPEG spec */
-
-		GstFlowReturn alloc_error;
-		GST_TRACE_OBJECT(dec, "Creating new output buffer with caps %" GST_PTR_FORMAT, GST_PAD_CAPS(GST_AUDIO_DECODER_SRC_PAD(dec)));
-		alloc_error = gst_pad_alloc_buffer(
-			GST_AUDIO_DECODER_SRC_PAD(dec),
-			GST_BUFFER_OFFSET_NONE,
-			INITIAL_OUTPUT_BUFFER_SIZE,
-			GST_PAD_CAPS(GST_AUDIO_DECODER_SRC_PAD(dec)),
-			&(mpg123_decoder->output_buffer)
-		);
-		if (alloc_error != GST_FLOW_OK)
-		{
-			/*
-			The docs say that in case of an error, the created GstBuffer should not be used. Looking at the
-			GstPad code shows that the buffer is automatically unref'd in case of an error, so no unref call is made here.
-			*/
-
-			mpg123_decoder->output_buffer = NULL;
-
-			/*
-			This is necessary to advance playback in time, even when nothing was decoded.
-			NOTE: The GST_ELEMENT_ERROR line that was here has been removed, because it caused playback to abort.
-			*/
-			return gst_audio_decoder_finish_frame(GST_AUDIO_DECODER(mpg123_decoder), NULL, 1);
-		}
-	}
-	else
-	{
-		/* An output buffer already exists - reuse it */
-		g_assert_cmpuint( INITIAL_OUTPUT_BUFFER_SIZE , == , GST_BUFFER_SIZE(mpg123_decoder->output_buffer) );
-		GST_TRACE_OBJECT(mpg123_decoder, "An output buffer already exists - reusing");
-	}
-
-	outmemory = (unsigned char *) GST_BUFFER_DATA(mpg123_decoder->output_buffer);
-	outmemsize = GST_BUFFER_SIZE(mpg123_decoder->output_buffer);
-
 	/* The actual decoding */
-	decode_error = mpg123_decode(mpg123_decoder->handle, inmemory, inmemsize, outmemory, outmemsize, &num_decoded_bytes);
+	mpg123_feed(mpg123_decoder->handle, inmemory, inmemsize);
+	decoded_bytes = NULL;
+	num_decoded_bytes = 0;
+	decode_error = mpg123_decode_frame(
+		mpg123_decoder->handle,
+		&mpg123_decoder->frame_offset,
+		&decoded_bytes,
+		&num_decoded_bytes
+	);
 
 	switch (decode_error)
 	{
@@ -343,13 +295,12 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 		case MPG123_NEW_FORMAT:
 		case MPG123_NEED_MORE:
 		case MPG123_OK:
-			gst_mpg123_push_output_buffer(mpg123_decoder, num_decoded_bytes);
-			break;
+			return gst_mpg123_push_decoded_bytes(mpg123_decoder, decoded_bytes, num_decoded_bytes);
 
 		/* If this happens, then the upstream parser somehow missed the ending of the bitstream */
 		case MPG123_DONE:
 			GST_DEBUG_OBJECT(dec, "mpg123 is done decoding");
-			gst_mpg123_push_output_buffer(mpg123_decoder, num_decoded_bytes);
+			gst_mpg123_push_decoded_bytes(mpg123_decoder, decoded_bytes, num_decoded_bytes);
 			return GST_FLOW_UNEXPECTED;
 
 		/* Anything else is considered an error */
@@ -357,8 +308,6 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 		{
 			GstElement *element = GST_ELEMENT(dec);
 			GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Decoding error: %s", mpg123_plain_strerror(decode_error)));
-			gst_buffer_unref(mpg123_decoder->output_buffer);
-			mpg123_decoder->output_buffer = NULL;
 
 			return GST_FLOW_ERROR;
 		}
