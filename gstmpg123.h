@@ -40,12 +40,21 @@ typedef struct _GstMpg123Class GstMpg123Class;
 #define GST_IS_MPG123(obj)          (G_TYPE_CHECK_INSTANCE_TYPE((obj), GST_TYPE_MPG123))
 #define GST_IS_MPG123_CLASS(klass)  (G_TYPE_CHECK_CLASS_TYPE((klass), GST_TYPE_MPG123))
 
+#if GST_CHECK_VERSION(1, 0, 0)
+#define GST_MPG123_USING_GSTREAMER_1_0
+#endif
+
 
 struct _GstMpg123
 {
 	GstAudioDecoder parent;
 	mpg123_handle *handle;
+#ifdef GST_MPG123_USING_GSTREAMER_1_0
+	GstAudioInfo next_audioinfo;
+	gboolean has_next_audioinfo;
+#else
 	GstCaps *next_srccaps;
+#endif
 	off_t frame_offset;
 };
 

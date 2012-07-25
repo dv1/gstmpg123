@@ -37,7 +37,7 @@ def options(opt):
 	opt.add_option('--with-package-name', action='store', default="gstmpg123 plug-in source release", help='specify package name to use in plugin [default: %default]')
 	opt.add_option('--with-package-origin', action='store', default="Unknown package origin", help='specify package origin URL to use in plugin [default: %default]')
 	opt.add_option('--disable-gstreamer-0-10', action='store_true', default=False, help='disables build for GStreamer 0.10 [default: enabled]')
-	opt.add_option('--enable-gstreamer-1-0', action='store_true', default=False, help='enables build for GStreamer 1.0 (UNFINISHED until GStreamer 1.0 is stable) [default: disabled]')
+	opt.add_option('--enable-gstreamer-1-0', action='store_true', default=False, help='enables build for GStreamer 1.0 [default: disabled]')
 	opt.add_option('--plugin-install-path', action='store', default="${PREFIX}/lib/gstreamer-0.10", help='where to install the plugin for GStreamer 0.10 [default: %default]')
 	opt.add_option('--plugin-install-path-1-0', action='store', default="${PREFIX}/lib/gstreamer-1.0", help='where to install the plugin for GStreamer 1.0 [default: %default]')
 	opt.load('compiler_cc')
@@ -101,7 +101,7 @@ def configure(conf):
 		conf.define('PACKAGE', "gstmpg123")
 		conf.define('VERSION', "0.10.1")
 		conf.write_config_header('0_10/config.h')
-		Logs.info("GStreamer 0.10 support enabled. To build, type ./waf or ./waf build_0_10")
+		Logs.info("GStreamer 0.10 support enabled. To build, type ./waf or ./waf build_0_10 ; to install, type ./waf install or ./waf install_0_10")
 		conf.env['SOURCES'] = ['gstmpg123-0_10.c']
 	if gst_1_0:
 		conf.setenv('1_0', env=original_env.derive())
@@ -114,7 +114,7 @@ def configure(conf):
 		conf.define('PACKAGE', "gstmpg123")
 		conf.define('VERSION', "1.0.1")
 		conf.write_config_header('1_0/config.h')
-		Logs.info("GStreamer 1.0 support enabled. To build, type ./waf build_1_0")
+		Logs.info("GStreamer 1.0 support enabled. To build, type ./waf build_1_0 ; to install, type ./waf install_1_0")
 		conf.env['SOURCES'] = ['gstmpg123-1_0.c']
 
 

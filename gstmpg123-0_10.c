@@ -440,7 +440,7 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 	should never deviate from the one the bitstream has, otherwise mpg123 has to mix channels and/or
 	resample (and as its docs say, its internal resampler is very crude). The sample format, however,
 	can be chosen freely, because the MPEG specs do not mandate any special format.
-	Therefore, rate and number of channels are taken from upstream (which parsed the MPEG frames, therefore
+	Therefore, rate and number of channels are taken from upstream (which parsed the MPEG frames, so
 	the incoming_caps contain exactly the rate and number of channels the bitstream actually has), while
 	the sample format is chosen by trying out all caps that are allowed by downstream. This way, the output
 	is adjusted to what the downstream prefers.
@@ -457,10 +457,9 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 	2. get allowed caps from src pad
 	3. for each structure in allowed caps:
 	3.1. take signed, width, media_type
-	3.2. if the combination of these three values is unsupported by mpg123, go to (3)
-	3.3. create candidate srccaps out of rate,channels,signed,width,media_type
-	3.4. if caps is usable (=allowed by downstream, set them as the next caps, call mp123_format() with these values, and exit
-	3.5. otherwise, go to (3) if there are other structures; if not, exit with error
+	3.2. if the combination of these three values is unsupported by mpg123, go to (3),
+	     or exit with error if there are no more structures to try
+	3.3. create next srccaps out of rate,channels,signed,width,media_type, and exit
 */
 
 
@@ -477,6 +476,12 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 		GstElement *element = GST_ELEMENT(dec);
 		GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("mpg123 handle is NULL"));
 		return FALSE;
+	}
+
+	if (mpg123_decoder->next_srccaps != NULL)
+	{
+		gst_caps_unref(mpg123_decoder->next_srccaps);
+		mpg123_decoder->next_srccaps = NULL;
 	}
 
 	/* Get rate and channels from incoming_caps */
@@ -513,7 +518,7 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 	for (structure_nr = 0; structure_nr < gst_caps_get_size(allowed_srccaps); ++structure_nr)
 	{
 		GstStructure *structure;
-		GstCaps *candidate_srccaps;
+		GstCaps *next_srccaps;
 		char const *media_type;
 		int width;
 		gboolean signed_, width_available, is_integer;
@@ -553,7 +558,7 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 			}
 		}
 
-		candidate_srccaps = gst_caps_new_simple(
+		next_srccaps = gst_caps_new_simple(
 			media_type,
  			"rate", G_TYPE_INT, rate,
  			"channels", G_TYPE_INT, channels,
@@ -564,7 +569,7 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 		if (width_available)
 		{
  			gst_caps_set_simple(
-				candidate_srccaps,
+				next_srccaps,
 				"width", G_TYPE_INT, width,
 				"depth", G_TYPE_INT, width,
 				NULL
@@ -574,16 +579,16 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 		if (is_integer)
 		{
  			gst_caps_set_simple(
-				candidate_srccaps,
+				next_srccaps,
  				"signed", G_TYPE_BOOLEAN, signed_,
  				NULL
  			);
 		}
 
-		GST_DEBUG_OBJECT(dec, "The next srccaps are: %" GST_PTR_FORMAT, candidate_srccaps);
+		GST_DEBUG_OBJECT(dec, "The next srccaps are: %" GST_PTR_FORMAT, next_srccaps);
 
 		match_found = TRUE;
-		mpg123_decoder->next_srccaps = candidate_srccaps;
+		mpg123_decoder->next_srccaps = next_srccaps;
 		break;
 	}
 

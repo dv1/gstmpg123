@@ -1,21 +1,34 @@
 Overview
 ========
 
-This is gstmpg123, a GStreamer plugin for MP3 decoding, using the mpg123 library. Currently, it is written for GStreamer 0.10.36;
-a port to the 0.11/1.0 branch is underway.
+This is gstmpg123, a GStreamer plugin for MP3 decoding, using the mpg123 library. Currently, it is written for
+GStreamer 0.10.36 (the 0.10 branch) and 0.11.92 (the 1.0 branch).
 
-`mpg123 <http://mpg123.de/>`_ is a free mp3 decoder, released under the LGPL. It consists of a C library and a command-line client.
+`mpg123 <http://mpg123.de/>`_ is a free mp3 decoder, released under the LGPL. It consists of a C library and
+a command-line client.
 
 
 Dependencies
 ============
 
 - GStreamer 0.10.36 or a new version in the 0.10 branch
+  or
+  GStreamer 0.11.92 or a new version in the 0.11/1.0 branch
 - mpg123 1.12.1
 
 
 Build instructions
 ==================
+
+Run::
+
+  ./waf -h
+
+To get a list of options. --prefix, --plugin-install-path, --plugin-install-path-1-0 are particularly interesting for local GStreamer
+installations and for cross compilings.
+
+GStreamer 0.10
+--------------
 
 This plugin makes use of the `waf build system <http://code.google.com/p/waf/>`_. For building, call::
 
@@ -25,11 +38,19 @@ Then, to install the plugin, call::
 
   ./waf install
 
-Run::
+(build_0_10 for building and install_0_10 also work).
 
-  ./waf -h
+GStreamer 1.0
+-------------
 
-To get a list of options. --prefix and --plugin-install-path are particularly interesting for local GStreamer installations and for cross compilings.
+Similar to the 0.10 build, call::
 
-The options and commands for GStreamer 1.0 are undocumented at the moment, since the 1.0 port is currently not working and unfinished. Development on it
-will resume once GStreamer 1.0 is stable.
+  ./waf configure build_1_0
+
+Then, to install the plugin, call::
+
+  ./waf install_1_0
+
+Please note that currently, the 1.0 branch is unstable, and major changes still may happen. The decoder could therefore cease to function
+with future versions.
+
