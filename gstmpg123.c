@@ -311,9 +311,14 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 			The docs say that in case of an error, the created GstBuffer should not be used. Looking at the
 			GstPad code shows that the buffer is automatically unref'd in case of an error, so no unref call is made here.
 			*/
-			GstElement *element = GST_ELEMENT(dec);
-			GST_ELEMENT_ERROR(element, STREAM, DECODE, (NULL), ("Creating new output buffer failed"));
-			return alloc_error;
+
+			mpg123_decoder->output_buffer = NULL;
+
+			/*
+			This is necessary to advance playback in time, even when nothing was decoded.
+			NOTE: The GST_ELEMENT_ERROR line that was here has been removed, because it caused playback to abort.
+			*/
+			return gst_audio_decoder_finish_frame(GST_AUDIO_DECODER(mpg123_decoder), NULL, 1);
 		}
 	}
 	else
