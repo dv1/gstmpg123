@@ -521,6 +521,8 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 		{
 			int err;
 
+			/* Cleanup old formats & set new one */
+			mpg123_format_none(mpg123_decoder->handle);
 			err = mpg123_format(mpg123_decoder->handle, rate, channels, encoding);
 			if (err != MPG123_OK)
 			{
