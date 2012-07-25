@@ -45,6 +45,7 @@ struct _GstMpg123
 {
 	GstAudioDecoder parent;
 	mpg123_handle *handle;
+	GstCaps *next_srccaps;
 	off_t frame_offset;
 };
 

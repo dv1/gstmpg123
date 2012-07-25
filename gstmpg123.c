@@ -171,6 +171,7 @@ static gboolean gst_mpg123_start(GstAudioDecoder *dec)
 	error = 0;
 
 	mpg123_decoder->handle = mpg123_new(NULL, &error);
+	mpg123_decoder->next_srccaps = NULL;
 	mpg123_decoder->frame_offset = 0;
 
 	/*
@@ -225,13 +226,15 @@ static GstFlowReturn gst_mpg123_push_decoded_bytes(GstMpg123 *mpg123_decoder, un
 	GstFlowReturn alloc_error;
 	GstAudioDecoder *dec;
 
-	if ((num_decoded_bytes == 0) || (decoded_bytes == NULL))
-		return GST_FLOW_OK; // TODO: call finish_frame here?
-
 	output_buffer = NULL;
 	dec = GST_AUDIO_DECODER(mpg123_decoder);
 
-	alloc_error = gst_pad_alloc_buffer(
+	if ((num_decoded_bytes == 0) || (decoded_bytes == NULL))
+	{
+		return gst_audio_decoder_finish_frame(dec, NULL, 1);
+	}
+
+	alloc_error = gst_pad_alloc_buffer_and_set_caps(
 		GST_AUDIO_DECODER_SRC_PAD(dec),
 		GST_BUFFER_OFFSET_NONE,
 		num_decoded_bytes,
@@ -288,11 +291,30 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 
 	switch (decode_error)
 	{
-		/*
-		NEW_FORMAT information is redundant; upstream told us about the rate and number of channels, downstream about the sample format
-		Therefore, the new format information is just ignored
-		*/
 		case MPG123_NEW_FORMAT:
+			/*
+			As mentioned in gst_mpg123_set_format(), the next srccaps are not set immediately;
+			instead, the code waits for mpg123 to take note of the new format, and then sets the caps
+			This fixes glitches with mp3s containing several format headers (for example, first half using 44.1kHz, second half 32 kHz)
+			*/
+
+			GST_DEBUG_OBJECT(dec, "mpg123 reported a new format -> setting next srccaps");
+			
+			gst_mpg123_push_decoded_bytes(mpg123_decoder, decoded_bytes, num_decoded_bytes);
+
+			/*
+			If there are next srccaps, use them, unref, and set the pointer to NULL, to make sure set_caps isn't called again
+			until set_format is called again by the base class
+			*/
+			if (mpg123_decoder->next_srccaps != NULL)
+			{
+				gst_pad_set_caps(GST_AUDIO_DECODER_SRC_PAD(dec), mpg123_decoder->next_srccaps);
+				gst_caps_unref(mpg123_decoder->next_srccaps);
+				mpg123_decoder->next_srccaps = NULL;
+			}
+
+			break;
+
 		case MPG123_NEED_MORE:
 		case MPG123_OK:
 			return gst_mpg123_push_decoded_bytes(mpg123_decoder, decoded_bytes, num_decoded_bytes);
@@ -401,6 +423,12 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 	the sample format is chosen by trying out all caps that are allowed by downstream. This way, the output
 	is adjusted to what the downstream prefers.
 
+	Also, the new downstream caps are not set immediately. Instead, they are considered the "next srccaps".
+	The code waits for mpg123 to notice the new format (= when mpg123_decode_frame() returns MPG123_NEW_FORMAT),
+	and then sets the next srccaps. Otherwise, the next srccaps are set too soon, which may cause problems with
+	mp3s containing several format headers. One example would be an mp3 with the first 30 seconds using 44.1 kHz,
+	then the next 30 seconds using 32 kHz. Rare, but possible.
+
 	STEPS:
 
 	1. get rate and channels from incoming_caps
@@ -409,7 +437,7 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 	3.1. take signed, width, media_type
 	3.2. if the combination of these three values is unsupported by mpg123, go to (3)
 	3.3. create candidate srccaps out of rate,channels,signed,width,media_type
-	3.4. if caps is usable (=allowed by downstream, use them, call mp123_format() with these values, and exit
+	3.4. if caps is usable (=allowed by downstream, set them as the next caps, call mp123_format() with these values, and exit
 	3.5. otherwise, go to (3) if there are other structures; if not, exit with error
 */
 
@@ -466,7 +494,7 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 		GstCaps *candidate_srccaps;
 		char const *media_type;
 		int width;
-		gboolean signed_, width_available, is_integer, set_caps_succeeded;
+		gboolean signed_, width_available, is_integer;
 		int encoding;
 
 		width_available = FALSE;
@@ -528,16 +556,11 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
  			);
 		}
 
-		GST_DEBUG_OBJECT(dec, "Setting srccaps %" GST_PTR_FORMAT, candidate_srccaps);
+		GST_DEBUG_OBJECT(dec, "The next srccaps are: %" GST_PTR_FORMAT, candidate_srccaps);
 
-		set_caps_succeeded = gst_pad_set_caps(GST_AUDIO_DECODER_SRC_PAD(dec), candidate_srccaps);
-		gst_caps_unref(candidate_srccaps);
-
-		if (set_caps_succeeded)
-		{
-			match_found = TRUE;
-			break;
-		}
+		match_found = TRUE;
+		mpg123_decoder->next_srccaps = candidate_srccaps;
+		break;
 	}
 
 	gst_caps_unref(allowed_srccaps);
@@ -575,6 +598,12 @@ static void gst_mpg123_flush(GstAudioDecoder *dec, gboolean hard)
 		mpg123_close(mpg123_decoder->handle);
 		mpg123_delete(mpg123_decoder->handle);
 		mpg123_decoder->handle = NULL;
+	}
+
+	if (mpg123_decoder->next_srccaps != NULL)
+	{
+		gst_caps_unref(mpg123_decoder->next_srccaps);
+		mpg123_decoder->next_srccaps = NULL;
 	}
 
 	/*
