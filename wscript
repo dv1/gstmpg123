@@ -35,8 +35,10 @@ def add_compiler_flags(conf, env, flags, lang, compiler, uselib = ''):
 
 
 def options(opt):
-	opt.add_option('--debug', action='store_true', default=False, help='enable debug build [default: %default]')
-	opt.add_option('--plugin-install-path', action='store', default="${PREFIX}/lib/gstreamer-0.10", help='Where to install the plugin [default: %default]')
+	opt.add_option('--enable-debug', action='store_true', default=False, help='enable debug build [default: %default]')
+	opt.add_option('--plugin-install-path', action='store', default="${PREFIX}/lib/gstreamer-0.10", help='where to install the plugin [default: %default]')
+	opt.add_option('--with-package-name', action='store', default="gstmpg123 plug-in source release", help='specify package name to use in plugin [default: %default]')
+	opt.add_option('--with-package-origin', action='store', default="Unknown package origin", help='specify package origin URL to use in plugin [default: %default]')
 	opt.tool_options('compiler_cc')
 
 
@@ -75,7 +77,7 @@ def configure(conf):
 
 	# check and add compiler flags
 	compiler_flags = ['-Wextra', '-Wall', '-std=c99', '-pedantic']
-	if conf.options.debug:
+	if conf.options.enable_debug:
 		compiler_flags += ['-O0', '-g3', '-ggdb']
 	else:
 		compiler_flags += ['-O2', '-s', '-fomit-frame-pointer', '-pipe']
@@ -83,6 +85,11 @@ def configure(conf):
 	add_compiler_flags(conf, conf.env, compiler_flags, 'C', 'CC', 'COMMON')
 
 	conf.env['PLUGIN_INSTALL_PATH'] = conf.options.plugin_install_path
+
+	conf.define('GST_PACKAGE_NAME', conf.options.with_package_name)
+	conf.define('GST_PACKAGE_ORIGIN', conf.options.with_package_origin)
+	conf.define('PACKAGE', "gstmpg123")
+	conf.define('VERSION', "0.10.1")
 
 	conf.write_config_header('config.h')
 

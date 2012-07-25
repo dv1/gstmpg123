@@ -623,11 +623,9 @@ static void gst_mpg123_flush(GstAudioDecoder *dec, gboolean hard)
 
 static gboolean plugin_init(GstPlugin *plugin)
 {
-	return gst_element_register(plugin, "mpg123", GST_RANK_PRIMARY, gst_mpg123_get_type());
+	return gst_element_register(plugin, "mpg123", GST_RANK_SECONDARY + 1, gst_mpg123_get_type());
 }
 
-
-#define PACKAGE "gstmpg123"
 
 
 GST_PLUGIN_DEFINE(
@@ -636,9 +634,9 @@ GST_PLUGIN_DEFINE(
 	"mpg123",
 	"mp3 decoding based on the mpg123 library",
 	plugin_init,
-	"1.0",
+	VERSION,
 	"LGPL",
-	PACKAGE,
-	"https://github.com/dv1/gstmpg123"
+	GST_PACKAGE_NAME,
+	GST_PACKAGE_ORIGIN
 )
 
