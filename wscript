@@ -10,6 +10,9 @@ def check_compiler_flag(conf, flag, lang):
 	return conf.check(fragment = 'int main() { float f = 4.0; char c = f; return c - 4; }\n', execute = 0, define_ret = 0, msg = 'Checking for compiler switch %s' % flag, cxxflags = conf.env[lang + 'FLAGS'] + [flag], okmsg = 'yes', errmsg = 'no')  # the code inside fragment deliberately does an unsafe implicit cast float->char to trigger a compiler warning; sometimes, gcc does not tell about an unsupported parameter *unless* the code being compiled causes a warning
 
 
+def check_compiler_flags_2(conf, cflags, ldflags, msg):
+	return conf.check(fragment = 'int main() { float f = 4.0; char c = f; return c - 4; }\n', execute = 0, define_ret = 0, msg = msg, cxxflags = cflags, ldflags = ldflags, okmsg = 'yes', errmsg = 'no')  # the code inside fragment deliberately does an unsafe implicit cast float->char to trigger a compiler warning; sometimes, gcc does not tell about an unsupported parameter *unless* the code being compiled causes a warning
+
 
 def add_compiler_flags(conf, env, flags, lang, compiler, uselib = ''):
 	for flag in flags:
@@ -26,10 +29,11 @@ def add_compiler_flags(conf, env, flags, lang, compiler, uselib = ''):
 			flags_pattern = lang + 'FLAGS'
 
 		if check_compiler_flag(conf, flag_candidate, compiler):
-			env.append_value(flags_pattern, [flag_candidate])
+			env.prepend_value(flags_pattern, [flag_candidate])
 		elif flag_alternative:
 			if check_compiler_flag(conf, flag_alternative, compiler):
-				env.append_value(flags_pattern, [flag_alternative])
+				env.prepend_value(flags_pattern, [flag_alternative])
+
 
 
 def options(opt):
@@ -43,8 +47,27 @@ def options(opt):
 	opt.load('compiler_cc')
 
 
+
 def configure(conf):
 	conf.load('compiler_cc')
+
+
+	# check and add compiler flags
+	if conf.env['CFLAGS'] and conf.env['LINKFLAGS']:
+		check_compiler_flags_2(conf, conf.env['CFLAGS'], conf.env['LINKFLAGS'], "Testing compiler flags %s and linker flags %s" % (' '.join(conf.env['CFLAGS']), ' '.join(conf.env['LINKFLAGS'])))
+	elif conf.env['CFLAGS']:
+		check_compiler_flags_2(conf, conf.env['CFLAGS'], '', "Testing compiler flags %s" % ' '.join(conf.env['CFLAGS']))
+	elif conf.env['LINKFLAGS']:
+		check_compiler_flags_2(conf, '', conf.env['LINKFLAGS'], "Testing linker flags %s" % ' '.join(conf.env['LINKFLAGS']))
+
+	compiler_flags = ['-Wextra', '-Wall', '-std=c99', '-pedantic']
+	if conf.options.enable_debug:
+		compiler_flags += ['-O0', '-g3', '-ggdb']
+	else:
+		compiler_flags += ['-O2', '-s']
+
+	add_compiler_flags(conf, conf.env, compiler_flags, 'C', 'CC')
+
 
 	# test for mpg123
 	conf.check_cfg(package='libmpg123 >= 1.12.1', uselib_store='MPG123', args='--cflags --libs', mandatory=1)
@@ -71,14 +94,8 @@ def configure(conf):
 			mandatory = 0 \
 		)
 
-	# check and add compiler flags
-	compiler_flags = ['-Wextra', '-Wall', '-std=c99', '-pedantic']
-	if conf.options.enable_debug:
-		compiler_flags += ['-O0', '-g3', '-ggdb']
-	else:
-		compiler_flags += ['-O2', '-s']
 
-	add_compiler_flags(conf, conf.env, compiler_flags, 'C', 'CC', 'COMMON')
+	# test for GStreamer libraries
 
 	gst_0_10 = not conf.options.disable_gstreamer_0_10
 	gst_1_0  = conf.options.enable_gstreamer_1_0
@@ -88,7 +105,6 @@ def configure(conf):
 
 	from waflib import Logs
 
-	# test for GStreamer libraries
 	original_env = conf.env
 	if gst_0_10:
 		conf.setenv('0_10', env=original_env.derive())
@@ -118,6 +134,7 @@ def configure(conf):
 		conf.env['SOURCES'] = ['gstmpg123-1_0.c']
 
 
+
 def build(bld):
 	if bld.variant == "0_10":
 		if not bld.env['GSTREAMER_0_10_ENABLED']:
@@ -136,6 +153,7 @@ def build(bld):
 		source = bld.env['SOURCES'],
 		install_path = bld.env['PLUGIN_INSTALL_PATH']
 	)
+
 
 
 def init(ctx):
