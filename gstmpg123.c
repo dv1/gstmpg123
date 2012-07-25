@@ -53,8 +53,24 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
 		"audio/x-raw-int, "
 		"endianness = (int) " G_STRINGIFY (G_BYTE_ORDER) ", "
 		"signed = (boolean) { true, false }, "
-		"width = (int) { 16, 24, 32 }, "
-		"depth = (int) { 16, 24, 32 }, "
+		"width = (int) 16, "
+		"depth = (int) 16, "
+		"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
+		"channels = (int) [ 1, 2 ]; "
+
+		"audio/x-raw-int, "
+		"endianness = (int) " G_STRINGIFY (G_BYTE_ORDER) ", "
+		"signed = (boolean) { true, false }, "
+		"width = (int) 24, "
+		"depth = (int) 24, "
+		"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
+		"channels = (int) [ 1, 2 ]; "
+
+		"audio/x-raw-int, "
+		"endianness = (int) " G_STRINGIFY (G_BYTE_ORDER) ", "
+		"signed = (boolean) { true, false }, "
+		"width = (int) 32, "
+		"depth = (int) 32, "
 		"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
 		"channels = (int) [ 1, 2 ]; "
 
@@ -63,7 +79,7 @@ static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
 		"width = (int) 32, "
 		"depth = (int) 32, "
 		"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
-		"channels = (int) [ 1, 2 ] "
+		"channels = (int) [ 1, 2 ]; "
 	)
 );
 
