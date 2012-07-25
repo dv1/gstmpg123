@@ -30,3 +30,6 @@ Run::
   ./waf -h
 
 To get a list of options. --prefix and --plugin-install-path are particularly interesting for local GStreamer installations and for cross compilings.
+
+The options and commands for GStreamer 1.0 are undocumented at the moment, since the 1.0 port is currently not working and unfinished. Development on it
+will resume once GStreamer 1.0 is stable.

@@ -276,8 +276,6 @@ static GstFlowReturn gst_mpg123_push_decoded_bytes(GstMpg123 *mpg123_decoder, un
 
 static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *buffer)
 {
-	unsigned char const *inmemory;
-	size_t inmemsize;
 	GstMpg123 *mpg123_decoder;
 	int decode_error;
 	unsigned char *decoded_bytes;
@@ -286,8 +284,6 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 	if (G_UNLIKELY(!buffer))
 		return GST_FLOW_OK;
 
-	inmemory = (unsigned char const *)(GST_BUFFER_DATA(buffer));
-	inmemsize = GST_BUFFER_SIZE(buffer);
 	mpg123_decoder = GST_MPG123(dec);
 
 	if (G_UNLIKELY(mpg123_decoder->handle == NULL))
@@ -298,15 +294,22 @@ static GstFlowReturn gst_mpg123_handle_frame(GstAudioDecoder *dec, GstBuffer *bu
 	}
 
 	/* The actual decoding */
-	mpg123_feed(mpg123_decoder->handle, inmemory, inmemsize);
-	decoded_bytes = NULL;
-	num_decoded_bytes = 0;
-	decode_error = mpg123_decode_frame(
-		mpg123_decoder->handle,
-		&mpg123_decoder->frame_offset,
-		&decoded_bytes,
-		&num_decoded_bytes
-	);
+	{
+		unsigned char const *inmemory;
+		size_t inmemsize;
+		inmemory = (unsigned char const *)(GST_BUFFER_DATA(buffer));
+		inmemsize = GST_BUFFER_SIZE(buffer);
+
+		mpg123_feed(mpg123_decoder->handle, inmemory, inmemsize);
+		decoded_bytes = NULL;
+		num_decoded_bytes = 0;
+		decode_error = mpg123_decode_frame(
+			mpg123_decoder->handle,
+			&mpg123_decoder->frame_offset,
+			&decoded_bytes,
+			&num_decoded_bytes
+		);
+	}
 
 	switch (decode_error)
 	{
