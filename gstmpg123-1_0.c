@@ -45,28 +45,6 @@ However, in all known installations, "real" equals 32bit float, so that's what i
 */
 
 
-#if (G_BYTE_ORDER == G_LITTLE_ENDIAN)
-#define GST_MPG123_SRC_TEMPLATE_FORMATS "S16LE, U16LE, S24LE, U24LE, S32LE, U32LE"
-#elif (G_BYTE_ORDER == G_BIG_ENDIAN)
-#define GST_MPG123_SRC_TEMPLATE_FORMATS "S16BE, U16BE, S24BE, U24BE, S32BE, U32BE"
-#else
-#error Unsupported endianness
-#endif
-
-
-static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
-	"src",
-	GST_PAD_SRC,
-	GST_PAD_ALWAYS,
-	GST_STATIC_CAPS(
-		"audio/x-raw, "
-		"format = { " GST_MPG123_SRC_TEMPLATE_FORMATS " }, "
-		"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
-		"channels = (int) [ 1, 2 ], "
-		"layout = (string) interleaved; "
-	)
-);
-
 static GstStaticPadTemplate sink_template = GST_STATIC_PAD_TEMPLATE(
 	"sink",
 	GST_PAD_SINK,
@@ -99,13 +77,16 @@ void gst_mpg123_class_init(GstMpg123Class *klass)
 {
 	GObjectClass *object_class;
 	GstAudioDecoderClass *base_class;
-	GstElementClass *element_class = GST_ELEMENT_CLASS(klass);
+	GstElementClass *element_class;
+	GstCaps *src_caps;
+	GstPadTemplate *src_template;
 	int error;
 
 	GST_DEBUG_CATEGORY_INIT(mpg123_debug, "mpg123", 0, "mpg123 mp3 decoder");
 
 	object_class = G_OBJECT_CLASS(klass);
 	base_class = GST_AUDIO_DECODER_CLASS(klass);
+	element_class = GST_ELEMENT_CLASS(klass);
 
 	object_class->finalize = gst_mpg123_finalize;
 
@@ -117,8 +98,66 @@ void gst_mpg123_class_init(GstMpg123Class *klass)
 		"Carlos Rafael Giani <dv@pseudoterminal.org>"
 	);
 
+	/*
+	Not using static pad template for srccaps, since the comma-separated list of formats needs to be
+	created depending on whatever mpg123 supports
+	*/
+	{
+		gchar *format_string;
+		gchar *caps_string;
+
+		static gchar const *src_caps_begin =
+			"audio/x-raw, "
+			"format = { ";
+		static gchar const *src_caps_end = 
+			" }, "
+			"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
+			"channels = (int) [ 1, 2 ], "
+			"layout = (string) interleaved; ";
+
+#if (G_BYTE_ORDER == G_LITTLE_ENDIAN)
+		#define ENDIAN_POSTFIX "LE"
+#else
+		#define ENDIAN_POSTFIX "BE"
+#endif
+
+		static gchar *supported_formats[] = {
+#ifdef MPG123_ENC_SIGNED_16_SUPPORTED
+			"S16" ENDIAN_POSTFIX,
+#endif
+#ifdef MPG123_ENC_UNSIGNED_16_SUPPORTED
+			"U16" ENDIAN_POSTFIX,
+#endif
+#ifdef MPG123_ENC_SIGNED_24_SUPPORTED
+			"S24" ENDIAN_POSTFIX,
+#endif
+#ifdef MPG123_ENC_UNSIGNED_24_SUPPORTED
+			"U24" ENDIAN_POSTFIX,
+#endif
+#ifdef MPG123_ENC_SIGNED_32_SUPPORTED
+			"S32" ENDIAN_POSTFIX,
+#endif
+#ifdef MPG123_ENC_UNSIGNED_32_SUPPORTED
+			"U32" ENDIAN_POSTFIX,
+#endif
+#ifdef MPG123_ENC_FLOAT_32_SUPPORTED
+			"F32" ENDIAN_POSTFIX,
+#endif
+			NULL
+		};
+
+		format_string = g_strjoinv(", ", supported_formats);
+		caps_string = g_strjoin(NULL, src_caps_begin, format_string, src_caps_end, NULL);
+
+		src_caps = gst_caps_from_string(caps_string);
+		src_template = gst_pad_template_new("src", GST_PAD_SRC, GST_PAD_ALWAYS, gst_caps_ref(src_caps));
+
+		g_free(format_string);
+		g_free(caps_string);
+	}
+
 	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&sink_template));
-	gst_element_class_add_pad_template(element_class, gst_static_pad_template_get(&src_template));
+	gst_element_class_add_pad_template(element_class, src_template);
 
 	base_class->start        = GST_DEBUG_FUNCPTR(gst_mpg123_start);
 	base_class->stop         = GST_DEBUG_FUNCPTR(gst_mpg123_stop);
@@ -464,13 +503,27 @@ static gboolean gst_mpg123_set_format(GstAudioDecoder *dec, GstCaps *incoming_ca
 
 		switch (format)
 		{
+#ifdef MPG123_ENC_SIGNED_16_SUPPORTED
 			case GST_AUDIO_FORMAT_S16: encoding = MPG123_ENC_SIGNED_16; break;
+#endif
+#ifdef MPG123_ENC_SIGNED_24_SUPPORTED
 			case GST_AUDIO_FORMAT_S24: encoding = MPG123_ENC_SIGNED_24; break;
+#endif
+#ifdef MPG123_ENC_SIGNED_32_SUPPORTED
 			case GST_AUDIO_FORMAT_S32: encoding = MPG123_ENC_SIGNED_32; break;
+#endif
+#ifdef MPG123_ENC_UNSIGNED_16_SUPPORTED
 			case GST_AUDIO_FORMAT_U16: encoding = MPG123_ENC_UNSIGNED_16; break;
+#endif
+#ifdef MPG123_ENC_UNSIGNED_24_SUPPORTED
 			case GST_AUDIO_FORMAT_U24: encoding = MPG123_ENC_UNSIGNED_24; break;
+#endif
+#ifdef MPG123_ENC_UNSIGNED_32_SUPPORTED
 			case GST_AUDIO_FORMAT_U32: encoding = MPG123_ENC_UNSIGNED_32; break;
+#endif
+#ifdef MPG123_ENC_FLOAT_32_SUPPORTED
 			case GST_AUDIO_FORMAT_F32: encoding = MPG123_ENC_FLOAT_32; break;
+#endif
 			default:
 				GST_DEBUG_OBJECT(dec, "Format %s in srccaps is not supported by mpg123", format_str);
 				continue;

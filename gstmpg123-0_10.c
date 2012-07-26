@@ -45,41 +45,86 @@ However, in all known installations, "real" equals 32bit float, so that's what i
 */
 
 
+/* Adapting static caps to whatever is supported by the mpg123 build */
+
+
+#if defined(MPG123_ENC_SIGNED_16_SUPPORTED) && defined(MPG123_ENC_UNSIGNED_16_SUPPORTED)
+	#define MPG123_SIGNED_STRING_16  "{ true, false }"
+#elif MPG123_ENC_SIGNED_16_SUPPORTED
+	#define MPG123_SIGNED_STRING_16  "true"
+#elif MPG123_ENC_UNSIGNED_16_SUPPORTED
+	#define MPG123_SIGNED_STRING_16 "false"
+#endif
+
+#if defined(MPG123_ENC_SIGNED_24_SUPPORTED) && defined(MPG123_ENC_UNSIGNED_24_SUPPORTED)
+	#define MPG123_SIGNED_STRING_24  "{ true, false }"
+#elif MPG123_ENC_SIGNED_24_SUPPORTED
+	#define MPG123_SIGNED_STRING_24  "true"
+#elif MPG123_ENC_UNSIGNED_24_SUPPORTED
+	#define MPG123_SIGNED_STRING_24 "false"
+#endif
+
+#if defined(MPG123_ENC_SIGNED_32_SUPPORTED) && defined(MPG123_ENC_UNSIGNED_32_SUPPORTED)
+	#define MPG123_SIGNED_STRING_32  "{ true, false }"
+#elif MPG123_ENC_SIGNED_32_SUPPORTED
+	#define MPG123_SIGNED_STRING_32  "true"
+#elif MPG123_ENC_UNSIGNED_32_SUPPORTED
+	#define MPG123_SIGNED_STRING_32 "false"
+#endif
+
+
+#define CREATE_MPG123_INT_CAPS(BITS) \
+	"audio/x-raw-int, " \
+	"endianness = (int) " G_STRINGIFY (G_BYTE_ORDER) ", " \
+	"signed = (boolean) " MPG123_SIGNED_STRING_ ##BITS ", " \
+	"width = (int) " #BITS ", " \
+	"depth = (int) " #BITS ", " \
+	"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, " \
+	"channels = (int) [ 1, 2 ]; "
+
+#define CREATE_MPG123_FLOAT_CAPS() \
+	"audio/x-raw-float, " \
+	"endianness = (int) " G_STRINGIFY (G_BYTE_ORDER) ", " \
+	"width = (int) 32, " \
+	"depth = (int) 32, " \
+	"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, " \
+	"channels = (int) [ 1, 2 ]; "
+
+
+#ifdef MPG123_ENC_FLOAT_32_SUPPORTED
+#define MPG123_FLOAT_CAPS  CREATE_MPG123_FLOAT_CAPS()
+#else
+#define MPG123_FLOAT_CAPS ""
+#endif
+
+#if defined(MPG123_ENC_SIGNED_32_SUPPORTED) || defined(MPG123_ENC_UNSIGNED_32_SUPPORTED)
+#define MPG123_INT_CAPS_32  CREATE_MPG123_INT_CAPS(32)
+#else
+#define MPG123_INT_CAPS_32 ""
+#endif
+
+#if defined(MPG123_ENC_SIGNED_24_SUPPORTED) || defined(MPG123_ENC_UNSIGNED_24_SUPPORTED)
+#define MPG123_INT_CAPS_24  CREATE_MPG123_INT_CAPS(24)
+#else
+#define MPG123_INT_CAPS_24 ""
+#endif
+
+#if defined(MPG123_ENC_SIGNED_16_SUPPORTED) || defined(MPG123_ENC_UNSIGNED_16_SUPPORTED)
+#define MPG123_INT_CAPS_16  CREATE_MPG123_INT_CAPS(16)
+#else
+#define MPG123_INT_CAPS_16 ""
+#endif
+
+
 static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE(
 	"src",
 	GST_PAD_SRC,
 	GST_PAD_ALWAYS,
 	GST_STATIC_CAPS(
-		"audio/x-raw-float, "
-		"endianness = (int) " G_STRINGIFY (G_BYTE_ORDER) ", "
-		"width = (int) 32, "
-		"depth = (int) 32, "
-		"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
-		"channels = (int) [ 1, 2 ]; "
-
-		"audio/x-raw-int, "
-		"endianness = (int) " G_STRINGIFY (G_BYTE_ORDER) ", "
-		"signed = (boolean) { true, false }, "
-		"width = (int) 32, "
-		"depth = (int) 32, "
-		"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
-		"channels = (int) [ 1, 2 ]; "
-
-		"audio/x-raw-int, "
-		"endianness = (int) " G_STRINGIFY (G_BYTE_ORDER) ", "
-		"signed = (boolean) { true, false }, "
-		"width = (int) 24, "
-		"depth = (int) 24, "
-		"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
-		"channels = (int) [ 1, 2 ]; "
-
-		"audio/x-raw-int, "
-		"endianness = (int) " G_STRINGIFY (G_BYTE_ORDER) ", "
-		"signed = (boolean) { true, false }, "
-		"width = (int) 16, "
-		"depth = (int) 16, "
-		"rate = (int) { 8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000 }, "
-		"channels = (int) [ 1, 2 ]; "
+		MPG123_FLOAT_CAPS
+		MPG123_INT_CAPS_32
+		MPG123_INT_CAPS_24
+		MPG123_INT_CAPS_16
 	)
 );
 
