@@ -292,8 +292,9 @@ static GstFlowReturn gst_mpg123_push_decoded_bytes(GstMpg123 *mpg123_decoder, un
 
 	if ((num_decoded_bytes == 0) || (decoded_bytes == NULL))
 	{
+		/* This occurs in the first few frames, which do not carry data; once MPG123_NEW_FORMAT is received, the empty frames stop occurring */
 		GST_TRACE_OBJECT(mpg123_decoder, "Nothing was decoded -> no output buffer to push");
-		return gst_audio_decoder_finish_frame(dec, NULL, 1);
+		return GST_FLOW_OK;
 	}
 
 	alloc_error = gst_pad_alloc_buffer_and_set_caps(
