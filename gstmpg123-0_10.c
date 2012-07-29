@@ -305,16 +305,16 @@ static GstFlowReturn gst_mpg123_push_decoded_bytes(GstMpg123 *mpg123_decoder, un
 		&output_buffer
 	);
 
-	GST_TRACE_OBJECT(mpg123_decoder, "Pushing output buffer with %u byte and caps %" GST_PTR_FORMAT, num_decoded_bytes, GST_BUFFER_CAPS(output_buffer));
-
 	if (alloc_error != GST_FLOW_OK)
 	{
 		/* This is necessary to advance playback in time, even when nothing was decoded. */
+		GST_INFO_OBJECT(mpg123_decoder, "Unable to push buffer: allocating buffer failed: %s - pushing null buffer instead", gst_flow_get_name(alloc_error));
 		return gst_audio_decoder_finish_frame(dec, NULL, 1);
 	}
 	else
 	{
 		memcpy(GST_BUFFER_DATA(output_buffer), decoded_bytes, num_decoded_bytes);
+		GST_TRACE_OBJECT(mpg123_decoder, "Pushing output buffer with %u byte and caps %" GST_PTR_FORMAT, num_decoded_bytes, GST_BUFFER_CAPS(output_buffer));
 		return gst_audio_decoder_finish_frame(dec, output_buffer, 1);
 	}
 }
