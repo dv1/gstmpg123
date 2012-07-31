@@ -49,6 +49,9 @@ def options(opt):
 
 
 def configure(conf):
+	import os
+
+
 	conf.load('compiler_cc')
 
 
@@ -111,7 +114,7 @@ def configure(conf):
 		conf.check_cfg(package='gstreamer-0.10 >= 0.10.36', uselib_store='GSTREAMER', args='--cflags --libs', mandatory=1)
 		conf.check_cfg(package='gstreamer-base-0.10 >= 0.10.36', uselib_store='GSTREAMER_BASE', args='--cflags --libs', mandatory=1)
 		conf.check_cfg(package='gstreamer-audio-0.10 >= 0.10.36', uselib_store='GSTREAMER_AUDIO', args='--cflags --libs', mandatory=1)
-		conf.env['PLUGIN_INSTALL_PATH'] = conf.options.plugin_install_path
+		conf.env['PLUGIN_INSTALL_PATH'] = os.path.abspath(os.path.expanduser(conf.options.plugin_install_path))
 		conf.define('GST_PACKAGE_NAME', conf.options.with_package_name)
 		conf.define('GST_PACKAGE_ORIGIN', conf.options.with_package_origin)
 		conf.define('PACKAGE', "gstmpg123")
@@ -124,7 +127,7 @@ def configure(conf):
 		conf.check_cfg(package='gstreamer-1.0 >= 0.11.92', uselib_store='GSTREAMER', args='--cflags --libs', mandatory=1)
 		conf.check_cfg(package='gstreamer-base-1.0 >= 0.11.92', uselib_store='GSTREAMER_BASE', args='--cflags --libs', mandatory=1)
 		conf.check_cfg(package='gstreamer-audio-1.0 >= 0.11.92', uselib_store='GSTREAMER_AUDIO', args='--cflags --libs', mandatory=1)
-		conf.env['PLUGIN_INSTALL_PATH'] = conf.options.plugin_install_path_1_0
+		conf.env['PLUGIN_INSTALL_PATH'] = os.path.abspath(os.path.expanduser(conf.options.plugin_install_path_1_0))
 		conf.define('GST_PACKAGE_NAME', conf.options.with_package_name)
 		conf.define('GST_PACKAGE_ORIGIN', conf.options.with_package_origin)
 		conf.define('PACKAGE', "gstmpg123")
