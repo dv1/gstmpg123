@@ -208,7 +208,7 @@ static gboolean gst_mpg123_start(GstAudioDecoder *dec)
 	*/
 	mpg123_format_none(mpg123_decoder->handle);
 
-	mpg123_param(mpg123_decoder->handle, MPG123_ADD_FLAGS,    MPG123_GAPLESS,    0); /* Enables support for gapless decoding (MP3 bitstream must have LAME/Xing extensions for this */
+	mpg123_param(mpg123_decoder->handle, MPG123_REMOVE_FLAGS, MPG123_GAPLESS,    0); /* Built-in mpg123 support for gapless decoding is disabled for now, since it does not work well with seeking */
 	mpg123_param(mpg123_decoder->handle, MPG123_ADD_FLAGS,    MPG123_SEEKBUFFER, 0); /* Tells mpg123 to use a small read-ahead buffer for better MPEG sync; essential for MP3 radio streams */
 	mpg123_param(mpg123_decoder->handle, MPG123_RESYNC_LIMIT, -1,                0); /* Sets the resync limit to the end of the stream (e.g. don't give up prematurely) */
 
