@@ -121,7 +121,7 @@ def configure(conf):
 		conf.define('VERSION', "0.10.1")
 		conf.write_config_header('0_10/config.h')
 		Logs.info("GStreamer 0.10 support enabled. To build, type ./waf or ./waf build_0_10 ; to install, type ./waf install or ./waf install_0_10")
-		conf.env['SOURCES'] = ['gstmpg123-0_10.c']
+		conf.env['SOURCES'] = ['src/gstmpg123-0_10.c']
 	if gst_1_0:
 		conf.setenv('1_0', env=original_env.derive())
 		conf.check_cfg(package='gstreamer-1.0 >= 0.11.92', uselib_store='GSTREAMER', args='--cflags --libs', mandatory=1)
@@ -134,7 +134,7 @@ def configure(conf):
 		conf.define('VERSION', "1.0.1")
 		conf.write_config_header('1_0/config.h')
 		Logs.info("GStreamer 1.0 support enabled. To build, type ./waf build_1_0 ; to install, type ./waf install_1_0")
-		conf.env['SOURCES'] = ['gstmpg123-1_0.c']
+		conf.env['SOURCES'] = ['src/gstmpg123-1_0.c']
 
 
 
@@ -150,7 +150,7 @@ def build(bld):
 
 	bld(
 		features = ['c', 'cshlib'],
-		includes = '.',
+		includes = ['.', 'src'],
 		uselib = 'GSTREAMER GSTREAMER_BASE GSTREAMER_AUDIO MPG123 COMMON',
 		target = 'gstmpg123',
 		source = bld.env['SOURCES'],
