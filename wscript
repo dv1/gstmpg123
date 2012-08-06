@@ -73,29 +73,7 @@ def configure(conf):
 
 
 	# test for mpg123
-	conf.check_cfg(package='libmpg123 >= 1.12.1', uselib_store='MPG123', args='--cflags --libs', mandatory=1)
-	sampleformats_to_test_for = [ \
-		{ "label" : "16 bit unsigned", "name" : "MPG123_ENC_UNSIGNED_16" }, \
-		{ "label" : "16 bit signed",   "name" : "MPG123_ENC_SIGNED_16"   }, \
-		{ "label" : "24 bit unsigned", "name" : "MPG123_ENC_UNSIGNED_24" }, \
-		{ "label" : "24 bit signed",   "name" : "MPG123_ENC_SIGNED_24"   }, \
-		{ "label" : "32 bit unsigned", "name" : "MPG123_ENC_UNSIGNED_32" }, \
-		{ "label" : "32 bit signed",   "name" : "MPG123_ENC_SIGNED_32"   }, \
-		{ "label" : "32 bit float",    "name" : "MPG123_ENC_FLOAT_32"    }, \
-		{ "label" : "64 bit float",    "name" : "MPG123_ENC_FLOAT_64"    }  \
-	]
-	for sampleformat in sampleformats_to_test_for:
-		conf.check_cc( \
-			fragment = '#include <mpg123.h>\nint main() { return %s; }\n' % sampleformat["name"], \
-			use = 'MPG123', \
-			execute = 0, \
-			define_name = sampleformat["name"] + "_SUPPORTED", \
-			define_ret = True, \
-			msg = 'Checking for %s sample support in mpg123' % sampleformat["label"], \
-			okmsg = 'yes', \
-			errmsg = 'no', \
-			mandatory = 0 \
-		)
+	conf.check_cfg(package='libmpg123 >= 1.13.0', uselib_store='MPG123', args='--cflags --libs', mandatory=1)
 
 
 	# test for GStreamer libraries
