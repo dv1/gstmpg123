@@ -51,6 +51,7 @@ Then, to install the plugin, call::
 
   ./waf install_1_0
 
-Please note that currently, the 1.0 branch is unstable, and major changes still may happen. The decoder could therefore cease to function
-with future versions.
+.. note:: This plugin has been included in the gst-plugins-bad package in GStreamer 1.0.
+   Currently, it can only be found in the `freedesktop git repository <cgit.freedesktop.org/gstreamer/gst-plugins-bad/>`_ , but may get included
+   in the GStreamer 1.0 release. Using the version from gst-plugin-bad is preferred, since it is already integrated in GStreamer.
 
